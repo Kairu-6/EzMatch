@@ -122,8 +122,11 @@ def _normalise_description(raw: str) -> str:
     return s.upper()
 
 
-def _fingerprint(date_iso: str, description: str, amount: float) -> str:
-    payload = f"{date_iso}|{description.upper()}|{round(amount, 2)}"
+def _fingerprint(date_iso: str, description: str, amount: float, occurrence: int) -> str:
+    # occurrence = how many times this exact (date, description, amount) combo
+    # has already appeared in this file. Two coffees bought on the same day
+    # for the same price get occurrence=0 and occurrence=1 — different hashes.
+    payload = f"{date_iso}|{description.upper()}|{round(amount, 2)}|{occurrence}"
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
@@ -193,6 +196,7 @@ def parse_bank_statement(
     # Parse rows
     transactions: list[dict] = []
     skipped = 0
+    _seen: dict[str, int] = {}  # tracks occurrence count per (date|desc|amount) key
 
     for idx, row in df.iterrows():
         if pd.isna(row[desc_col]) and pd.isna(row[amount_col]):
@@ -228,7 +232,10 @@ def parse_bank_statement(
             except ValueError:
                 pass
 
-        txn_id = _fingerprint(date_iso, description, amount)
+        _key        = f"{date_iso}|{description.upper()}|{round(amount, 2)}"
+        occurrence  = _seen.get(_key, 0)
+        _seen[_key] = occurrence + 1
+        txn_id      = _fingerprint(date_iso, description, amount, occurrence)
 
         try:
             txn = TransactionSchema(
