@@ -3,10 +3,23 @@ import re
 import hashlib
 import logging
 from datetime import datetime, date
+from supabase import create_client, Client
 from typing import Any
+from dotenv import load_dotenv
+import json
 
 import pandas as pd
-from pydantic import BaseModel, field_validator, ValidationError
+from pydantic import ValidationError
+
+# We only need the one schema now!
+from data_contracts import TransactionSchema
+
+load_dotenv()
+
+SUPABASE_URL = os.environ["SUPABASE_URL"]
+SUPABASE_KEY = os.environ["SUPABASE_API_KEY"]
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Logging
 
@@ -37,33 +50,6 @@ DATE_FORMATS = [
 
 _REF_NOISE  = re.compile(r"\b(ref|ref#|txn|trx|id|no\.?)\s*[#:]?\s*[\w\-]+", flags=re.IGNORECASE)
 _WHITESPACE = re.compile(r"\s{2,}")
-
-# Schema
-
-class TransactionSchema(BaseModel):
-    transaction_id:        str
-    date:                  str
-    description:           str
-    description_normalised: str
-    amount:                float
-    currency:              str
-    running_balance:       float | None
-
-    @field_validator("currency")
-    @classmethod
-    def currency_must_be_iso(cls, v: str) -> str:
-        if not v or not v.isalpha() or len(v) != 3:
-            raise ValueError(f"Currency '{v}' is not a valid 3-letter ISO 4217 code.")
-        return v.upper()
-
-    @field_validator("date")
-    @classmethod
-    def date_must_be_iso(cls, v: str) -> str:
-        try:
-            datetime.strptime(v, "%Y-%m-%d")
-        except ValueError:
-            raise ValueError(f"Date '{v}' is not in ISO 8601 format (YYYY-MM-DD).")
-        return v
 
 # Helpers
 
@@ -123,9 +109,6 @@ def _normalise_description(raw: str) -> str:
 
 
 def _fingerprint(date_iso: str, description: str, amount: float, occurrence: int) -> str:
-    # occurrence = how many times this exact (date, description, amount) combo
-    # has already appeared in this file. Two coffees bought on the same day
-    # for the same price get occurrence=0 and occurrence=1 — different hashes.
     payload = f"{date_iso}|{description.upper()}|{round(amount, 2)}|{occurrence}"
     return hashlib.sha256(payload.encode()).hexdigest()
 
@@ -238,14 +221,18 @@ def parse_bank_statement(
         txn_id      = _fingerprint(date_iso, description, amount, occurrence)
 
         try:
+            # Splitting debit and credit immediately using the new schema
             txn = TransactionSchema(
                 transaction_id=txn_id,
-                date=date_iso,
+                transaction_date=date_iso,
                 description=description,
                 description_normalised=description_normalised,
-                amount=amount,
-                currency=local_currency,
+                reference_number=None,
+                debit_amount=round(abs(amount), 2) if amount < 0 else None,
+                credit_amount=round(amount, 2)     if amount >= 0 else None,
+                currency_code=local_currency,
                 running_balance=running_balance,
+                is_matched=False,
             )
             transactions.append(txn.model_dump())
         except ValidationError as exc:
@@ -256,16 +243,17 @@ def parse_bank_statement(
     if not transactions:
         return {"status": "error", "message": "No valid transactions found in file."}
 
-    # Build metadata
-    amounts = [t["amount"] for t in transactions]
-    dates   = [t["date"] for t in transactions]
+    # Build metadata using the newly split columns
+    credits = [t["credit_amount"] for t in transactions if t["credit_amount"] is not None]
+    debits  = [t["debit_amount"]  for t in transactions if t["debit_amount"]  is not None]
+    dates   = [t["transaction_date"] for t in transactions]
     meta = {
         "total_transactions": len(transactions),
         "skipped_rows":       skipped,
         "date_range":         {"from": min(dates), "to": max(dates)},
-        "total_credits":      round(sum(a for a in amounts if a > 0), 2),
-        "total_debits":       round(sum(a for a in amounts if a < 0), 2),
-        "net":                round(sum(amounts), 2),
+        "total_credits":      round(sum(credits), 2),
+        "total_debits":       round(sum(debits), 2),
+        "net":                round(sum(credits) - sum(debits), 2),
         "currency":           local_currency.upper(),
     }
 
@@ -275,3 +263,54 @@ def parse_bank_statement(
     )
 
     return {"status": "success", "data": transactions, "meta": meta}
+
+
+def upload_parsed_statement(parsed_result: dict[str, Any], statement_id: str, supabase: Any):
+    if parsed_result.get("status") != "success":
+        logger.error("Cannot upload: parsing was not successful.")
+        return None
+
+    db_ready_rows = []
+    
+    for raw_row in parsed_result["data"]:
+        # The row is already formatted perfectly! Just add the statement ID.
+        raw_row["statement_id"] = statement_id
+        db_ready_rows.append(raw_row)
+
+    if not db_ready_rows:
+        logger.warning("No valid rows to upload.")
+        return None
+
+    try:
+        response = (
+            supabase.table("bank_transaction")
+            .upsert(db_ready_rows, on_conflict="transaction_id")
+            .execute()
+        )
+        logger.info(f"Successfully upserted {len(response.data)} transactions to DB.")
+        return response.data
+        
+    except Exception as exc:
+        logger.exception("Failed to upload to Supabase.")
+        raise
+
+# --- TESTING EXECUTION ---
+
+print("--- STARTING PARSE ---")
+result = parse_bank_statement(
+    file_path="statement2.csv", 
+    local_currency="MYR"
+)
+
+print(json.dumps(result, indent=2))
+
+print("--- STARTING UPLOAD ---")
+
+# Replace this with your actual database testing UUID if necessary
+upload_result = upload_parsed_statement(
+    parsed_result=result, 
+    statement_id="222e4567-e89b-12d3-a456-426614174222", 
+    supabase=supabase
+)
+
+print("Upload complete!")
