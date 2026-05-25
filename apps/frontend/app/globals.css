@@ -1,2 +1,20 @@
 @import "tailwindcss";
 
+/* Tailwind v4 reads standard utility classes. By adding color variables here,
+  we bypass editor validation warnings while preserving our custom styles.
+*/
+:root {
+  --background: #fcfdfd;
+  --foreground: #0f172a;
+  --card: #ffffff;
+  --primary: #059669;
+  --primary-hover: #047857;
+  --accent: #3b82f6;
+  --border: #f1f5f9;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: system-ui, -apple-system, sans-serif;
+}
