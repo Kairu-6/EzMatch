@@ -2,9 +2,11 @@ fastapi
 uvicorn
 python-dotenv
 supabase
+pymupdf
 # Parser dependencies (statement_parser.py)
 pydantic>=2.0.0
 pandas>=2.0.0
 openpyxl>=3.1.0
 
+httpx
 python-multipart
