@@ -57,7 +57,7 @@ export default function BankStatementsPage() {
 
     try {
       // Send the actual file to your local Python Server
-      const response = await fetch("http://127.0.0.1:8000/api/upload", {
+      const response = await fetch("http://127.0.0.1:8000/api/upload/statement", {
         method: "POST",
         body: formData
       });

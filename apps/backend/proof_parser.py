@@ -6,6 +6,7 @@ import json
 from openai import OpenAI
 from pydantic import ValidationError
 import fitz
+import uuid
 
 load_dotenv()
 
@@ -330,12 +331,3 @@ def process_payment_proof(proof_id: str, file_path: str, file_type: str):
         print(f"Failed to update database for {proof_id}. Error: {db_error}")
         return None
 
-# ══════════════════════════════════════════════════════════════════
-# 5. EXECUTION BLOCK FOR TESTING
-# ══════════════════════════════════════════════════════════════════
-if __name__ == "__main__":
-    process_payment_proof(
-        proof_id="b6066b85-2254-4fed-b468-dc2811edeefe", # Your correct proof_id
-        file_path="testpdf2.pdf",                    # Updated to png
-        file_type="pdf"                                  # Updated to png
-    )

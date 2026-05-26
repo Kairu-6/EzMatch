@@ -1,12 +1,26 @@
 fastapi
 uvicorn
+<<<<<<< HEAD
 python-dotenv
 supabase
 pymupdf
+=======
+<<<<<<< Updated upstream
+python-dotenv
+=======
+python-dotenv
+supabase
+pymupdf
+python-multipart
+>>>>>>> origin/kai
 # Parser dependencies (statement_parser.py)
 pydantic>=2.0.0
 pandas>=2.0.0
 openpyxl>=3.1.0
+<<<<<<< HEAD
 
 httpx
 python-multipart
+=======
+>>>>>>> Stashed changes
+>>>>>>> origin/kai

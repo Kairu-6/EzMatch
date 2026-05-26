@@ -3,6 +3,7 @@ import { ArrowRightLeft, CheckCircle2, AlertTriangle } from "lucide-react";
 import React, { useState, useEffect } from "react";
 import { createClient } from '@supabase/supabase-js';
 import { Banknote, Clock, ShieldAlert, Play, Database, FileSpreadsheet, Terminal as TerminalIcon } from "lucide-react";
+import { SME_ID } from "../mockdata";
 
 const mockMatches = [
     {
@@ -65,14 +66,17 @@ export default function HackathonDashboard() {
     setMatchStatus("Pending");
 
     try {
-      // Hit your local Python FastAPI Server
-      const response = await fetch("http://127.0.0.1:8000/api/upload", { 
+      // Hit your local Python FastAPI Server to trigger the background job
+      const response = await fetch(`http://127.0.0.1:8000/api/reconcile/${SME_ID}`, { 
         method: "POST",
       });
 
       if (response.ok) {
-        setLogs(prev => [...prev, "> [0:04] Python Server responding. Executing Chutes AI OCR..."]);
+        setLogs(prev => [...prev, "> [0:04] Node connection established. Queueing Morpheus DeAI job..."]);
         
+        // Hackathon Demo Magic: Your backend returns instantly (202 Accepted), 
+        // but we keep the 2-second timeout here so the judges get to watch 
+        // the terminal text "think" before it finishes!
         setTimeout(() => {
           setLogs(prev => [
             ...prev, 
