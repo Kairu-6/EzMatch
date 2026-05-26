@@ -1,7 +1,13 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
+import { createClient } from '@supabase/supabase-js';
 import { FileSpreadsheet, UploadCloud, Loader2 } from "lucide-react";
+
+// 1. HARDCODED SUPABASE CONNECTION 
+const supabaseUrl = 'https://yipmoeioxawqrsbtmkqb.supabase.co';
+const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlpcG1vZWlveGF3cXJzYnRta3FiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2MDU0MzcsImV4cCI6MjA5NTE4MTQzN30.Jk_21i-epvvhEMTCbAC9FgSBjcBtv_pSZqyu6j40hrc'; 
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 const INITIAL_STATEMENTS = [
   { id: "TXN-8801", date: "2026-05-25", reference: "STRIPE-TRANSFER-77A", description: "Payout Settlement Corridor Clear", currency: "USD", foreignAmount: 10.00, landedMYR: 42.50, status: "Reconciled" },
@@ -10,44 +16,69 @@ const INITIAL_STATEMENTS = [
 ];
 
 export default function BankStatementsPage() {
-  const [statements, setStatements] = useState(INITIAL_STATEMENTS);
+  const [statements, setStatements] = useState<any[]>(INITIAL_STATEMENTS);
   const [isUploading, setIsUploading] = useState(false);
   const [isAutoMatching, setIsAutoMatching] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Simulation effect to match the "Morpheus Autonomous Engine" timeline from Screen 1
-  const uploadCsv = (name: string) => {
+  // 2. FETCH REAL DATA FROM SUPABASE
+  const fetchLedgerData = async () => {
+    const { data, error } = await supabase
+      .from('bank_transaction')
+      .select('*')
+      .order('transaction_date', { ascending: false });
+
+    if (data && data.length > 0) {
+      const formattedData = data.map(row => ({
+        id: row.transaction_id ? row.transaction_id.substring(0, 8).toUpperCase() : 'TXN-UNKNOWN',
+        date: row.transaction_date || "2026-05-26",
+        reference: row.reference_number || "SYS-GEN-REF",
+        description: row.description_normalised || "Incoming Bank Feed",
+        currency: row.currency_code || "USD", 
+        foreignAmount: 0.00, // Replace if you extract this from Chutes AI later
+        landedMYR: Math.abs(row.credit_amount || row.debit_amount || 0),
+        status: row.is_matched ? "Reconciled" : "Pending"
+      }));
+      setStatements([...formattedData, ...INITIAL_STATEMENTS]); // Put new DB rows at the top!
+    }
+  };
+
+  // Load data when page opens
+  useEffect(() => {
+    fetchLedgerData();
+  }, []);
+
+  // 3. THE REAL PYTHON API UPLOAD
+  const uploadCsv = async (file: File) => {
     setIsUploading(true);
-    setTimeout(() => {
-      const newTxnId = `TXN-${Math.floor(1000 + Math.random() * 9000)}`;
-      
-      // 1. Ingest the raw file row as "Pending" (Requirement 3: The Status Badge)
-      setStatements(prev => [{
-        id: newTxnId,
-        date: "2026-05-26",
-        reference: "BULK-CSV-IMPORT-99X",
-        description: `Ingested Feed (${name})`,
-        currency: "USD",
-        foreignAmount: 42.00,
-        landedMYR: 176.82,
-        status: "Pending"
-      }, ...prev]);
+    
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      // Send the actual file to your local Python Server
+      const response = await fetch("http://127.0.0.1:8000/api/upload", {
+        method: "POST",
+        body: formData
+      });
+
+      if (response.ok) {
+        setIsUploading(false);
+        setIsAutoMatching(true); // Trigger your friend's Morpheus matching animation
+        
+        // Wait 3 seconds so the judges can see the cool animation, then fetch the new DB rows!
+        setTimeout(() => {
+          fetchLedgerData();
+          setIsAutoMatching(false);
+        }, 3000);
+      } else {
+        throw new Error("Upload failed on the Python side");
+      }
+    } catch (error) {
+      console.error("Failed to reach Python server:", error);
+      alert("Could not connect to Python! Is your backend running on port 8000?");
       setIsUploading(false);
-
-      // 2. Trigger automated background Morpheus reconciliation right after upload!
-      setIsAutoMatching(true);
-      setTimeout(() => {
-        setStatements(currentStatements => 
-          currentStatements.map(txn => 
-            txn.id === newTxnId || txn.status === "Pending" 
-              ? { ...txn, status: "Reconciled" } 
-              : txn
-          )
-        );
-        setIsAutoMatching(false);
-      }, 3000); // After 3 seconds, flip the badge to Matched/Reconciled!
-
-    }, 1200);
+    }
   };
 
   return (
@@ -68,11 +99,12 @@ export default function BankStatementsPage() {
         onClick={() => fileInputRef.current?.click()}
         className="border-2 border-dashed rounded-xl p-6 text-center transition-all cursor-pointer bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-800 hover:border-slate-400 min-h-[130px] flex flex-col items-center justify-center"
       >
-        <input type="file" ref={fileInputRef} onChange={(e) => e.target.files?.[0] && uploadCsv(e.target.files[0].name)} accept=".csv" className="hidden" />
+        {/* Pass the actual File object to uploadCsv now */}
+        <input type="file" ref={fileInputRef} onChange={(e) => e.target.files?.[0] && uploadCsv(e.target.files[0])} accept=".csv, .xlsx" className="hidden" />
         {isUploading ? (
           <div className="space-y-2 text-center">
             <Loader2 className="w-6 h-6 text-emerald-500 animate-spin mx-auto" />
-            <p className="text-xs font-mono font-bold">Parsing CSV Pipeline structure...</p>
+            <p className="text-xs font-mono font-bold">Passing file to Python Backend...</p>
           </div>
         ) : (
           <div className="space-y-1">
@@ -96,15 +128,14 @@ export default function BankStatementsPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-            {statements.map((txn) => (
-              <tr key={txn.id} className="hover:bg-slate-50/40 dark:hover:bg-slate-950/20">
+            {statements.map((txn, idx) => (
+              <tr key={`${txn.id}-${idx}`} className="hover:bg-slate-50/40 dark:hover:bg-slate-950/20">
                 <td className="p-3 text-slate-500">{txn.date}</td>
                 <td className="p-3 font-bold text-slate-400">{txn.id}</td>
                 <td className="p-3 font-sans font-bold">{txn.description}</td>
-                <td className="p-3 text-right font-bold">{txn.currency} {txn.foreignAmount.toFixed(2)}</td>
+                <td className="p-3 text-right font-bold">{txn.currency} {txn.foreignAmount ? txn.foreignAmount.toFixed(2) : "0.00"}</td>
                 <td className="p-3 text-right font-bold text-emerald-600">RM {txn.landedMYR.toFixed(2)}</td>
                 <td className="p-3 text-center">
-                  {/* STEP 3 COMPLIANCE: TAILWIND BADGE BINDING */}
                   <span className={`px-2 py-0.5 rounded-sm text-[9px] font-sans border uppercase font-bold transition-all duration-300 ${
                     txn.status === "Reconciled" 
                       ? "bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/40" 
