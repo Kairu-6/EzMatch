@@ -295,22 +295,22 @@ def upload_parsed_statement(parsed_result: dict[str, Any], statement_id: str, su
         raise
 
 # --- TESTING EXECUTION ---
+if __name__ == "__main__":
+    print("--- STARTING PARSE ---")
+    result = parse_bank_statement(
+        file_path="statement2.csv", 
+        local_currency="MYR"
+    )
 
-print("--- STARTING PARSE ---")
-result = parse_bank_statement(
-    file_path="statement2.csv", 
-    local_currency="MYR"
-)
+    print(json.dumps(result, indent=2))
 
-print(json.dumps(result, indent=2))
+    print("--- STARTING UPLOAD ---")
 
-print("--- STARTING UPLOAD ---")
+    # Replace this with your actual database testing UUID if necessary
+    upload_result = upload_parsed_statement(
+        parsed_result=result, 
+        statement_id="222e4567-e89b-12d3-a456-426614174222", 
+        supabase=supabase
+    )
 
-# Replace this with your actual database testing UUID if necessary
-upload_result = upload_parsed_statement(
-    parsed_result=result, 
-    statement_id="222e4567-e89b-12d3-a456-426614174222", 
-    supabase=supabase
-)
-
-print("Upload complete!")
+    print("Upload complete!")

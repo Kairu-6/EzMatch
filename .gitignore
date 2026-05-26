@@ -12,6 +12,9 @@ apps/frontend/.yarn/*
 !apps/frontend/.yarn/releases
 !apps/frontend/.yarn/versions
 
+#environment
+apps/frontend/.env.local
+
 # testing
 apps/frontend/coverage
 
@@ -35,6 +38,7 @@ apps/frontend/.vercel
 apps/backend/venv/
 apps/backend/.venv/
 apps/backend/env/
+apps/backend/.env/
 
 # compiled files
 apps/backend/__pycache__/
