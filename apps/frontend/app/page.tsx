@@ -148,7 +148,7 @@ export default function HackathonDashboard() {
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 rounded-xl shadow-xs flex flex-col justify-between transition-colors">
           <span className="text-xs font-bold text-slate-400 uppercase font-mono">Reconciliation Engine Accuracy</span>
           <div className="flex items-center justify-center py-4">
-            <div className="relative w-28 h-28 rounded-full border-[12px] border-emerald-500 flex items-center justify-center border-t-slate-200 dark:border-t-slate-800">
+            <div className="relative w-28 h-28 rounded-full border-12 border-emerald-500 flex items-center justify-center border-t-slate-200 dark:border-t-slate-800">
               <span className="text-xs font-mono font-bold text-center absolute text-slate-900 dark:text-white">94.2%<br/><span className="text-[9px] text-slate-400">MATCHED</span></span>
             </div>
           </div>
