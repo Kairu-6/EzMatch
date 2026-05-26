@@ -1,32 +1,18 @@
 "use client";
-<<<<<<< HEAD
-import React, { createContext, useContext, useState } from "react";
-
-// 1. Create the Context
-const ThemeContext = createContext<any>(null);
-
-// 2. Export the Provider to wrap the app in layout.tsx
-export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setTheme] = useState("light");
-
-  return (
-    <ThemeContext.Provider value={{ theme, setTheme }}>
-      {/* This ensures the dark mode class is applied safely */}
-      <div className={theme === "dark" ? "dark" : ""}>
-        {children}
-      </div>
-=======
 
 import React, { createContext, useContext, useState, useEffect } from "react";
 
+// 1. Create the Context with default values
 const ThemeContext = createContext({
-  darkMode: false,
+  darkMode: true, // Defaulting to your dark hacker aesthetic
   toggleDarkMode: () => {},
 });
 
+// 2. Export the Provider to wrap the app in layout.tsx
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [darkMode, setDarkMode] = useState(true);
 
+  // Safe side-effect: Updates the root HTML tag for Tailwind
   useEffect(() => {
     const root = window.document.documentElement;
     if (darkMode) {
@@ -43,13 +29,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   return (
     <ThemeContext.Provider value={{ darkMode, toggleDarkMode }}>
       {children}
->>>>>>> d9a30e5da91220dc49be3e7d49e30037a4c39f58
     </ThemeContext.Provider>
   );
 }
 
-<<<<<<< HEAD
-// 3. Export the hook so their layout.tsx doesn't crash
-=======
->>>>>>> d9a30e5da91220dc49be3e7d49e30037a4c39f58
+// 3. Export the hook for use in other components
 export const useTheme = () => useContext(ThemeContext);
