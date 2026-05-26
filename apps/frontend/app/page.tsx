@@ -37,30 +37,23 @@ export default function HackathonDashboard() {
     fetchLiveStats();
   }, [isRunning]);
 
-  // THE REAL UPLOAD FUNCTION
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
+  // THE NEW RECONCILE FUNCTION
+  const handleReconcile = async () => {
     setIsRunning(true);
     setLogs([
       `> [0:01] Morpheus Agent activated...`,
-      `> [0:02] Captured file: ${file.name}. Initializing upload to Python Backend...`
+      `> [0:02] Initializing reconciliation with Python Backend...`
     ]);
     setMatchStatus("Pending");
-
-    const formData = new FormData();
-    formData.append("file", file);
 
     try {
       // Hit your local Python FastAPI Server
       const response = await fetch("http://127.0.0.1:8000/api/upload", { 
         method: "POST",
-        body: formData
       });
 
       if (response.ok) {
-        setLogs(prev => [...prev, "> [0:04] Python Server caught file. Executing Chutes AI OCR..."]);
+        setLogs(prev => [...prev, "> [0:04] Python Server responding. Executing Chutes AI OCR..."]);
         
         setTimeout(() => {
           setLogs(prev => [
@@ -72,7 +65,7 @@ export default function HackathonDashboard() {
           setMatchStatus("Matched");
         }, 2000);
       } else {
-        throw new Error("Server rejected file");
+        throw new Error("Server rejected request");
       }
     } catch (error) {
       setLogs(prev => [
@@ -167,18 +160,15 @@ export default function HackathonDashboard() {
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-3">
           <h3 className="text-sm font-black uppercase text-slate-800 dark:text-slate-200 tracking-wider">The Engine: Multi-Currency Core Ledger</h3>
           
-          {/* UPLOAD BUTTON */}
-          <label className={`bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs px-5 py-3 rounded-xl flex items-center gap-2 shadow-md transition cursor-pointer ${isRunning ? "opacity-50 pointer-events-none" : ""}`}>
+          {/* RECONCILE BUTTON */}
+          <button 
+            onClick={handleReconcile}
+            disabled={isRunning}
+            className={`bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs px-5 py-3 rounded-xl flex items-center gap-2 shadow-md transition cursor-pointer ${isRunning ? "opacity-50 pointer-events-none" : ""}`}
+          >
             <Play className={`w-3.5 h-3.5 fill-white ${isRunning ? "animate-spin" : ""}`} />
-            {isRunning ? "PROCESSING AI..." : "UPLOAD & RUN MORPHEUS"}
-            <input 
-              type="file" 
-              className="hidden" 
-              accept=".csv, .xlsx" 
-              onChange={handleFileUpload} 
-              disabled={isRunning}
-            />
-          </label>
+            {isRunning ? "PROCESSING AI..." : "RECONCILIATE"}
+          </button>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -250,7 +240,7 @@ export default function HackathonDashboard() {
         </div>
         <div className="p-4 h-32 overflow-y-auto font-mono text-xs space-y-1 bg-slate-900 dark:bg-slate-950">
           {logs.length === 0 ? (
-            <p className="text-slate-500 italic">{">"} Awaiting trigger... Click "UPLOAD & RUN MORPHEUS" to trace algorithmic logic lines.</p>
+            <p className="text-slate-500 italic">{">"} Awaiting trigger... Click "RECONCILIATE" to trace algorithmic logic lines.</p>
           ) : (
             logs.map((line, idx) => (
               <p key={idx} className={idx === logs.length - 1 ? "text-emerald-400 font-bold" : "text-slate-300"}>{line}</p>
