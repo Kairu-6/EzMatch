@@ -146,7 +146,7 @@ export default function Home() {
                         {match.status === 'Exact Match' ? 'Log to Ledger' : 'Resolve'}
                       </button>
                     </td>
-                  </tr>cd
+                  </tr>
                 ))}
               </tbody>
             </table>
