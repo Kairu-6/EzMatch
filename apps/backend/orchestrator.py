@@ -129,7 +129,7 @@ def _build_morpheus_prompt(job_input: OrchestratorJobInput, rates: dict) -> str:
         )
 
         block = (
-            f"INVOICE {inv.invoice_id[:8]}:\n"
+            f"INVOICE {inv.invoice_id}:\n"
             f"  number:        {inv.invoice_number}\n"
             f"  counterparty:  {inv.counterparty_name}\n"
             f"  amount:        {inv.invoice_amount} {inv.invoice_currency}\n"
@@ -139,7 +139,7 @@ def _build_morpheus_prompt(job_input: OrchestratorJobInput, rates: dict) -> str:
         )
         if proof:
             block += (
-                f"  proof_id:      {proof.proof_id[:8]}\n"
+                f"  proof_id:      {proof.proof_id}\n"
                 f"  proof_amount:  {proof.parsed_amount} {proof.parsed_currency}\n"
                 f"  proof_ref:     {proof.parsed_reference}\n"
             )
@@ -153,7 +153,7 @@ def _build_morpheus_prompt(job_input: OrchestratorJobInput, rates: dict) -> str:
             else f"-{txn.debit_amount} {txn.currency_code} (debit)"
         )
         txn_blocks.append(
-            f"TRANSACTION {txn.transaction_id[:8]}:\n"
+            f"TRANSACTION {txn.transaction_id}:\n"
             f"  date:           {txn.transaction_date}\n"
             f"  description:    {txn.description_normalised}\n"
             f"  amount:         {amount_display}\n"

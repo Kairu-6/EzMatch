@@ -14,6 +14,7 @@ Components covered:
 """
 
 from __future__ import annotations
+from typing import Optional
 from datetime import date, datetime
 from typing import Any
 from pydantic import BaseModel, field_validator
@@ -393,7 +394,7 @@ class ReconciliationMatchInsert(BaseModel):
     invoice_id:         str
     transaction_id:     str
     proof_id:           str | None
-    rate_id:            str
+    rate_id:          str | None = None
     match_confidence:   float
     invoice_amount:     float
     invoice_currency:   str
@@ -411,8 +412,8 @@ class ReconciliationMatchInsert(BaseModel):
         proposal:    MorpheusMatchProposal,
         invoice:     InvoiceForMatching,
         transaction: TransactionForMatching,
-        rate_id:     str,
         rate:        float,
+        rate_id: Optional[str] = None,
         threshold:   float = 0.75,
     ) -> "ReconciliationMatchInsert":
         txn_amount    = transaction.credit_amount or 0.0

@@ -43,6 +43,7 @@ export default function HackathonDashboard() {
   }, [isRunning]); // Re-run when a job finishes to update numbers
 
   // FETCH REAL MATCHES AFTER JOB COMPLETES
+// FETCH REAL MATCHES AFTER JOB COMPLETES
   const fetchCompletedMatches = async (jobId: string) => {
     setLogs(prev => [...prev, `> [SUPABASE] Pulling live reconciliation ledger for Job ${jobId.substring(0,8)}...`]);
     
@@ -56,7 +57,7 @@ export default function HackathonDashboard() {
         invoice_currency,
         transaction_amount,
         tx_currency,
-        rate,
+        converted_amount, 
         invoice ( invoice_number, counterparty_name )
       `)
       .eq('job_id', jobId);
@@ -73,7 +74,8 @@ export default function HackathonDashboard() {
         client: m.invoice?.counterparty_name || "Unknown Entity",
         billed: { currency: m.invoice_currency, amount: m.invoice_amount },
         received: { currency: m.tx_currency, amount: m.transaction_amount },
-        rate: m.rate ? m.rate.toFixed(4) : "1.0000",
+        // Calculate the rate on the fly to avoid complex DB joins!
+        rate: (m.converted_amount && m.invoice_amount) ? (m.converted_amount / m.invoice_amount).toFixed(4) : "1.0000",
         status: m.match_status === 'auto' ? 'Exact Match' : 'Partial Match'
       }));
       
