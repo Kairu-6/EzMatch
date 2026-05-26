@@ -22,7 +22,6 @@ SUPABASE_KEY = os.environ["SUPABASE_API_KEY"]
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Logging
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -30,7 +29,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Constants
-
 DATE_ALIASES    = {"date", "transaction date", "value date", "txn date", "posting date", "trans. date"}
 DESC_ALIASES    = {"description", "details", "particulars", "narration", "transaction details", "remarks"}
 AMOUNT_ALIASES  = {"amount", "value", "sum", "net amount"}
@@ -52,7 +50,6 @@ _REF_NOISE  = re.compile(r"\b(ref|ref#|txn|trx|id|no\.?)\s*[#:]?\s*[\w\-]+", fla
 _WHITESPACE = re.compile(r"\s{2,}")
 
 # Helpers
-
 def _detect_encoding(file_path: str) -> str:
     for enc in ("utf-8-sig", "utf-8", "latin-1"):
         try:
@@ -128,7 +125,6 @@ def _merge_debit_credit(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 # Public API
-
 def parse_bank_statement(
     file_path: str,
     local_currency: str,
@@ -270,10 +266,35 @@ def upload_parsed_statement(parsed_result: dict[str, Any], statement_id: str, su
         logger.error("Cannot upload: parsing was not successful.")
         return None
 
+    # --- FIX STEP 1: Get a valid account_id for the hackathon MVP ---
+    account_res = supabase.table("bank_account").select("account_id").limit(1).execute()
+    if not account_res.data:
+        logger.error("No bank accounts found! Cannot link statement.")
+        return None
+    account_id = account_res.data[0]["account_id"]
+
+    # --- FIX STEP 2: Create the Parent Statement Record First ---
+    meta = parsed_result["meta"]
+    statement_payload = {
+        "statement_id": statement_id,
+        "account_id": account_id,
+        "file_type": "csv",
+        "file_path": f"/{statement_id}.csv", # giving it a clean path just in case
+        "period_start": meta["date_range"]["from"],
+        "period_end": meta["date_range"]["to"],
+    }
+    
+    try:
+        supabase.table("bank_statement").upsert(statement_payload).execute()
+        logger.info(f"Created parent statement {statement_id} successfully.")
+    except Exception as exc:
+        logger.exception("Failed to create parent bank_statement record.")
+        raise
+
+    # --- FIX STEP 3: Insert the Transactions ---
     db_ready_rows = []
     
     for raw_row in parsed_result["data"]:
-        # The row is already formatted perfectly! Just add the statement ID.
         raw_row["statement_id"] = statement_id
         db_ready_rows.append(raw_row)
 
@@ -291,7 +312,7 @@ def upload_parsed_statement(parsed_result: dict[str, Any], statement_id: str, su
         return response.data
         
     except Exception as exc:
-        logger.exception("Failed to upload to Supabase.")
+        logger.exception("Failed to upload transactions to Supabase.")
         raise
 
 # --- TESTING EXECUTION ---
@@ -306,10 +327,13 @@ if __name__ == "__main__":
 
     print("--- STARTING UPLOAD ---")
 
-    # Replace this with your actual database testing UUID if necessary
+    # Generating a fresh UUID so the test script won't crash on duplicates
+    import uuid
+    test_id = str(uuid.uuid4())
+    
     upload_result = upload_parsed_statement(
         parsed_result=result, 
-        statement_id="222e4567-e89b-12d3-a456-426614174222", 
+        statement_id=test_id, 
         supabase=supabase
     )
 

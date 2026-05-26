@@ -1,11 +1,8 @@
-"""
-orchestrator.py
-"""
-
 import os
 import uuid
 import logging
 import httpx
+import json
 from datetime import datetime, date, timedelta
 from dotenv import load_dotenv
 from supabase import create_client, Client
@@ -32,9 +29,10 @@ logger = logging.getLogger(__name__)
 
 SUPABASE_URL  = os.getenv("SUPABASE_URL")
 SUPABASE_KEY  = os.getenv("SUPABASE_API_KEY")
-MORPHEUS_URL  = os.getenv("MORPHEUS_URL", "https://api.mor.org/api/v1/chat/completions")
+MORPHEUS_URL  = os.getenv("MORPHEUS_URL", "[https://api.mor.org/api/v1/chat/completions](https://api.mor.org/api/v1/chat/completions)")
 MORPHEUS_API_KEY      = os.getenv("MORPHEUS_API_KEY")
-MORPHEUS_MODEL        = os.getenv("MORPHEUS_MODEL", "glm-4.7-flash")
+# ✅ FIX 1: Set default to the working model from your test script
+MORPHEUS_MODEL        = os.getenv("MORPHEUS_MODEL", "qwen3-5-9b")
 CONFIDENCE_THRESHOLD  = float(os.getenv("CONFIDENCE_THRESHOLD", "0.75"))
 
 # Logging helper
@@ -193,9 +191,14 @@ Example:
 ]
 """
 
-
+# ✅ FIX 2: Super Debug Mode for API Call
 def _call_morpheus(prompt: str) -> list[MorpheusMatchProposal]:
-    import json
+    print("\n" + "="*60)
+    print("🤖 [DEBUG] SENDING PROMPT TO MORPHEUS:")
+    print("="*60)
+    print(prompt)
+    print("="*60 + "\n")
+
     headers = {
         "Content-Type":  "application/json",
         "Authorization": f"Bearer {MORPHEUS_API_KEY}",
@@ -205,16 +208,46 @@ def _call_morpheus(prompt: str) -> list[MorpheusMatchProposal]:
         "messages": [{"role": "user", "content": prompt}],
         "stream":   False,
     }
-    response = httpx.post(MORPHEUS_URL, json=payload, headers=headers, timeout=60)
+    
+    target_url = MORPHEUS_URL
+    if not target_url.endswith("/chat/completions"):
+        target_url = f"{target_url.rstrip('/')}/chat/completions"
+        
+    print(f"⏳ Waiting for Morpheus to respond at {target_url}...")
+    print(f"🧠 Using Model: {MORPHEUS_MODEL}")
+    print("⏱️  Timeout set to 180 seconds. Please wait...")
+    
+    # HARDCODED TIMEOUT TO 180 SECONDS
+    response = httpx.post(target_url, json=payload, headers=headers, timeout=180.0)
+    
+    print(f"⚡ Status Code: {response.status_code}")
     response.raise_for_status()
 
     raw_text = response.json()["choices"][0]["message"]["content"].strip()
-    if raw_text.startswith("```"):
-        raw_text = raw_text.split("```")[1]
-        if raw_text.startswith("json"):
-            raw_text = raw_text[4:]
+    
+    print("\n" + "="*60)
+    print("💬 [DEBUG] RAW RESPONSE FROM MORPHEUS:")
+    print("="*60)
+    print(raw_text)
+    print("="*60 + "\n")
 
-    return [MorpheusMatchProposal(**p) for p in json.loads(raw_text)]
+    # ✅ FIX 3: Bulletproof JSON cleaner (strips markdown formatting)
+    if raw_text.startswith("```"):
+        lines = raw_text.splitlines()
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        raw_text = "\n".join(lines).strip()
+        if raw_text.lower().startswith("json"):
+            raw_text = raw_text[4:].strip()
+
+    try:
+        parsed_json = json.loads(raw_text)
+        return [MorpheusMatchProposal(**p) for p in parsed_json]
+    except json.JSONDecodeError as e:
+        print(f"❌ CRITICAL PARSING ERROR: Morpheus did not return valid JSON. Error: {e}")
+        raise
 
 # Step 5: Write matches
 

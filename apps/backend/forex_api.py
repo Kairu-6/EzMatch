@@ -203,14 +203,13 @@ def get_rates_batch(
             # Map the result back using the object's own built-in base/quote knowledge
             results[(api_response.base, api_response.quote, date_str)] = (rate_id, rate)
             
-            # Log the successful database insertion
+            # ✅ FIXED: Changed parameter names from status/details to event_type/metadata
             _log(
                 supabase=supabase, 
                 job_id=job_id, 
-                status="rate_inserted",
+                event_type="rate_inserted",
                 message=f"{api_response.base}→{api_response.quote} on {date_str} = {rate}.",
-                details={"rate_id": rate_id, "rate": rate}
+                metadata={"rate_id": rate_id, "rate": rate}
             )
 
     return results
-
