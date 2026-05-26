@@ -145,25 +145,14 @@ class ParsedProofData(BaseModel):
 
 
 class ChutesParserOutput(BaseModel):
-    """
-    What Chutes returns to the backend after parsing.
-
-    DB columns mapped (UPDATE on payment_proof WHERE proof_id = ...):
-      parse_status     ← status
-      parsed_amount    ← parsed_amount
-      parsed_currency  ← parsed_currency
-      parsed_date      ← parsed_date
-      parsed_reference ← parsed_reference
-      parsed_data      ← parsed_data.model_dump()
-    """
     proof_id:         str
-    status:           ParseStatus         # completed | failed
-    parsed_amount:    float | None        # e.g. 10.00
-    parsed_currency:  str | None          # e.g. "USD"
-    parsed_date:      str | None          # ISO 8601 date of payment
-    parsed_reference: str | None          # transaction ref on the receipt
-    parsed_data:      ParsedProofData | None
-    message:          str | None = None   # error description if status = failed
+    status:           ParseStatus         
+    parsed_amount:    float | None = None          # <-- Added = None
+    parsed_currency:  str | None = None            # <-- Added = None
+    parsed_date:      str | None = None            # <-- Added = None
+    parsed_reference: str | None = None            # <-- Added = None
+    parsed_data:      ParsedProofData | None = None # <-- Added = None
+    message:          str | None = None   
 
     @field_validator("parsed_currency")
     @classmethod
@@ -238,7 +227,8 @@ class FrankfurterResponse(BaseModel):
     """
     base:  str
     date:  str             # YYYY-MM-DD returned by the API
-    rates: dict[str, float]  # {to_currency: rate}
+    quote: str          # was "rates: dict" — API returns single target as "quote"
+    rate:  float
 
 
 class ExchangeRateInsert(BaseModel):
@@ -268,13 +258,12 @@ class ExchangeRateInsert(BaseModel):
     def from_api_response(
         cls,
         response: FrankfurterResponse,
-        to_currency: str,
         transaction_date: date,
     ) -> "ExchangeRateInsert":
         return cls(
             from_currency = response.base,
-            to_currency   = to_currency,
-            rate          = response.rates[to_currency],
+            to_currency   = response.quote,   # was response.rates[to_currency]
+            rate          = response.rate,    # was response.rates[to_currency]
             effective_at  = datetime.combine(transaction_date, datetime.min.time()),
         )
 
