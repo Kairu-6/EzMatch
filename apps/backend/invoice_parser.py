@@ -18,11 +18,11 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_API_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-MORPHEUS_API_KEY = os.environ.get("MORPHEUS_API_KEY")
-MORPHEUS_URL = os.environ.get("MORPHEUS_URL")
-morpheus_client = OpenAI(
-    base_url=MORPHEUS_URL, 
-    api_key=MORPHEUS_API_KEY
+CHUTES_API_KEY = os.environ.get("CHUTES_API_KEY")
+CHUTES_URL = os.environ.get("CHUTES_URL")
+chutes_client = OpenAI(
+    base_url=CHUTES_URL, 
+    api_key=CHUTES_API_KEY
 )
 
 # ══════════════════════════════════════════════════════════════════
@@ -61,18 +61,18 @@ class InvoiceParserOutput(BaseModel):
 
 
 # ══════════════════════════════════════════════════════════════════
-# 3A. IMAGE PARSER (CHUTES / MORPHEUS VISION)
+# 3A. IMAGE PARSER (CHUTES VISION)
 # ══════════════════════════════════════════════════════════════════
 def extract_invoice_image(input_data: InvoiceParserInput) -> InvoiceParserOutput:
-    print(f"--> [Morpheus Vision] Analyzing invoice image: {input_data.file_path}")
+    print(f"--> [Chutes Vision] Analyzing invoice image: {input_data.file_path}")
     
     try:
         file_bytes = supabase.storage.from_("invoices").download(input_data.file_path)
         base64_image = base64.b64encode(file_bytes).decode('utf-8')
         mime_type = "image/jpeg" if input_data.file_type in ["jpg", "jpeg"] else f"image/{input_data.file_type}"
 
-        response = morpheus_client.chat.completions.create(
-            model="qwen3-5-9b", 
+        response = chutes_client.chat.completions.create(
+            model="Qwen/Qwen3.6-27B-TEE", 
             messages=[
                 {
                     "role": "system",
@@ -137,7 +137,7 @@ def extract_invoice_image(input_data: InvoiceParserInput) -> InvoiceParserOutput
         return InvoiceParserOutput(
             invoice_id=input_data.invoice_id,
             status=ParseStatus.FAILED,
-            message=f"Morpheus Vision Error: {str(e)}"
+            message=f"Chutes Vision Error: {str(e)}"
         )
 
 
@@ -160,8 +160,8 @@ def extract_invoice_pdf(input_data: InvoiceParserInput) -> InvoiceParserOutput:
         if not extracted_text.strip():
             raise ValueError("No readable text found in PDF. It may be a scanned image.")
 
-        response = morpheus_client.chat.completions.create(
-            model="qwen3-5-9b",
+        response = chutes_client.chat.completions.create(
+            model="Qwen/Qwen3.6-27B-TEE",
             messages=[
                 {
                     "role": "system",
@@ -253,6 +253,11 @@ def process_invoice(invoice_id: str, file_path: str, file_type: str):
             message=f"Parser exception: {str(e)}"
         )
 
+    # 🔥 DEBUG CATCH: Reveal the hidden error!
+    print(f"\n🧠 [AI Extraction Status]: {output.status.upper()}")
+    if output.status == ParseStatus.FAILED:
+        print(f"🚨 [CRITICAL AI ERROR]: {output.message}")
+
     # 1. Base update payload (Top-level table columns)
     update_payload = {
         "status": "pending"  # The only status column that actually exists on this table
@@ -293,3 +298,40 @@ def process_invoice(invoice_id: str, file_path: str, file_type: str):
         print("--- INVOICE ORCHESTRATOR END ---\n")
         return None
     
+
+if __name__ == "__main__":
+    import uuid
+
+    # 1. Generate a dummy UUID for the test
+    test_invoice_id = str(uuid.uuid4())
+    
+    # ⚠️ For this test to succeed, we must insert the dummy row FIRST
+    # otherwise the .update() function in Supabase will return [] silently.
+    print(f"\n🟡 [SETUP] Inserting dummy row into DB for invoice_id: {test_invoice_id}")
+    supabase.table("invoice").insert({
+        "invoice_id": test_invoice_id,
+        "status": "pending"
+    }).execute()
+    
+    # ⚠️ IMPORTANT: For this local test to work, you MUST manually upload 
+    # a file named "test_invoice.pdf" into your Supabase 'invoices' bucket first!
+    test_file_path = "test_invoice.pdf" 
+    test_file_type = "pdf"
+    
+    print("\n" + "="*50)
+    print(f"🧪 INITIATING LOCAL INVOICE TEST")
+    print("="*50)
+
+    # 2. Fire the orchestrator
+    result = process_invoice(
+        invoice_id=test_invoice_id,
+        file_path=test_file_path,
+        file_type=test_file_type
+    )
+    print(result)
+    
+    # 3. Print the final outcome returned from Supabase
+    if result:
+        print("\n🎉 Test Complete! Check your Supabase database for the updated row.")
+    else:
+        print("\n❌ Test Failed. Check the logs above for errors.")

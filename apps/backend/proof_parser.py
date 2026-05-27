@@ -10,17 +10,6 @@ import uuid
 
 load_dotenv()
 
-SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_KEY = os.environ["SUPABASE_API_KEY"]
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-MORPHEUS_API_KEY = os.environ["MORPHEUS_API_KEY"]
-MORPHEUS_URL = os.environ["MORPHEUS_URL"]
-morpheus_client = OpenAI(
-    base_url=MORPHEUS_URL, 
-    api_key=MORPHEUS_API_KEY
-)
-
 # 1. Import strictly from your existing data_contracts.py
 from data_contracts import (
     ParseStatus,
@@ -30,17 +19,24 @@ from data_contracts import (
 )
 
 # ══════════════════════════════════════════════════════════════════
-# 2. SUPABASE SETUP
+# 2. SUPABASE & CHUTES SETUP
 # ══════════════════════════════════════════════════════════════════
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_API_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+CHUTES_API_KEY = os.environ.get("CHUTES_API_KEY")
+CHUTES_URL = os.environ.get("CHUTES_URL")
+chutes_client = OpenAI(
+    base_url=CHUTES_URL, 
+    api_key=CHUTES_API_KEY
+)
+
 # ══════════════════════════════════════════════════════════════════
-# 3. CHUTES AI LOGIC (PLACEHOLDER - FAILING SCENARIO)
+# 3A. IMAGE PARSER (CHUTES VISION)
 # ══════════════════════════════════════════════════════════════════
 def extract_data_with_chutes(input_data: ChutesParserInput) -> ChutesParserOutput:
-    print(f"--> [Morpheus AI] Analyzing file: {input_data.file_path}")
+    print(f"--> [Chutes Vision] Analyzing file: {input_data.file_path}")
     
     try:
         # 1. Download file from Supabase
@@ -80,12 +76,11 @@ def extract_data_with_chutes(input_data: ChutesParserInput) -> ChutesParserOutpu
         }
         """
 
-        # 3. Call Morpheus API
-        response = morpheus_client.chat.completions.create(
-            model="qwen3-5-9b", 
+        # 3. Call Chutes API
+        response = chutes_client.chat.completions.create(
+            model="Qwen/Qwen3.6-27B-TEE", 
             messages=[
                 {
-                    # Keep the system prompt tiny, exactly like your working version
                     "role": "system",
                     "content": "You are a precise financial OCR API. Return ONLY valid JSON." 
                 },
@@ -157,13 +152,13 @@ def extract_data_with_chutes(input_data: ChutesParserInput) -> ChutesParserOutpu
         return ChutesParserOutput(
             proof_id=input_data.proof_id,
             status=ParseStatus.FAILED,
-            message="Morpheus failed to return valid JSON."
+            message="Chutes AI failed to return valid JSON."
         )
     except Exception as e:
         return ChutesParserOutput(
             proof_id=input_data.proof_id,
             status=ParseStatus.FAILED,
-            message=f"Morpheus API Error: {str(e)}"
+            message=f"Chutes API Error: {str(e)}"
         )
 
 # ══════════════════════════════════════════════════════════════════
@@ -190,9 +185,9 @@ def extract_data_from_pdf(input_data: ChutesParserInput) -> ChutesParserOutput:
             
         print(f"--> [PDF Parser] Successfully extracted {len(extracted_text)} characters.")
 
-        # 3. Call Morpheus API (Text-Only Mode)
-        response = morpheus_client.chat.completions.create(
-            model="qwen3-5-9b", # Can be swapped to a pure text model like llama-3.3-70b
+        # 3. Call Chutes API (Text-Only Mode)
+        response = chutes_client.chat.completions.create(
+            model="Qwen/Qwen3.6-27B-TEE", 
             messages=[
                 {
                     "role": "system",
@@ -257,7 +252,7 @@ def extract_data_from_pdf(input_data: ChutesParserInput) -> ChutesParserOutput:
         return ChutesParserOutput(
             proof_id=input_data.proof_id,
             status=ParseStatus.FAILED,
-            message="Model Hallucination: The AI failed to return valid JSON."
+            message="Model Hallucination: Chutes AI failed to return valid JSON."
         )
     except ValidationError as val_err:
         error_details = "; ".join([f"{e['loc'][0]}: {e['msg']}" for e in val_err.errors()])
@@ -280,7 +275,7 @@ def process_payment_proof(proof_id: str, file_path: str, file_type: str):
     """
     Handles the lifecycle of an uploaded payment proof.
     """
-    print(f"Starting processing for proof_id: {proof_id}")
+    print(f"\nStarting processing for proof_id: {proof_id}")
 
     parser_input = ChutesParserInput(
         proof_id=proof_id,
@@ -301,6 +296,12 @@ def process_payment_proof(proof_id: str, file_path: str, file_type: str):
             status=ParseStatus.FAILED,
             message=f"Parser API exception: {str(e)}"
         )
+
+    # 🔥 DEBUG CATCH: Reveal any hidden errors
+    if output.status == ParseStatus.FAILED:
+        print(f"🚨 [CRITICAL AI ERROR]: {output.message}")
+    else:
+        print(f"✅ [AI Extraction Status]: {output.status.upper()}")
 
     # Build the update payload mapping exactly to the Supabase columns
     update_payload = {
@@ -324,10 +325,49 @@ def process_payment_proof(proof_id: str, file_path: str, file_type: str):
             .eq("proof_id", output.proof_id)
             .execute()
         )
-        print(f"Successfully updated Supabase for proof_id: {proof_id}")
+        print(f"Successfully updated Supabase for proof_id: {proof_id}\n")
         return response.data
     
     except Exception as db_error:
-        print(f"Failed to update database for {proof_id}. Error: {db_error}")
+        print(f"❌ Failed to update database for {proof_id}. Error: {db_error}\n")
         return None
+    
 
+if __name__ == "__main__":
+    import uuid
+
+    # 1. Generate a dummy UUID for the test
+    test_proof_id = str(uuid.uuid4())
+    
+    # ⚠️ IMPORTANT: For this local test to work, you MUST manually upload 
+    # a file named "test_proof.jpg" (or .pdf) into your Supabase 'proofs' bucket first!
+    test_file_path = "test-receipt.png"  # Change to .pdf if you are testing a PDF
+    test_file_type = "png"             # Change to "pdf" if you are testing a PDF
+    
+    # 2. Insert the dummy row FIRST so the AI has something to update
+    print(f"\n🟡 [SETUP] Inserting dummy row into DB for proof_id: {test_proof_id}")
+    supabase.table("payment_proof").insert({
+        "proof_id": test_proof_id,
+        "parse_status": "pending",
+        "file_type": test_file_type,
+        "file_path": test_file_path
+    }).execute()
+    
+    print("\n" + "="*50)
+    print(f"🧪 INITIATING LOCAL PAYMENT PROOF TEST")
+    print("="*50)
+
+    # 3. Fire the orchestrator
+    result = process_payment_proof(
+        proof_id=test_proof_id,
+        file_path=test_file_path,
+        file_type=test_file_type
+    )
+    
+    print("\n[DB Result]:", result)
+    
+    # 4. Final outcome
+    if result:
+        print("\n🎉 Test Complete! Check your Supabase database for the updated row.")
+    else:
+        print("\n❌ Test Failed. Check the logs above for errors.")
