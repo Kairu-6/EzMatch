@@ -6,7 +6,6 @@ from datetime import datetime, date
 from supabase import create_client, Client
 from typing import Any
 from dotenv import load_dotenv
-import json
 
 import pandas as pd
 from pydantic import ValidationError
@@ -273,21 +272,22 @@ def upload_parsed_statement(
         return None
 
     # --- STEP 1: Resolve the target account ---
-    # Use the explicitly chosen account if provided; otherwise fall back to the
-    # tenant's primary/first account (single-tenant MVP).
+    # Use the explicitly chosen account if provided; otherwise fall back to this
+    # tenant's primary account. sme_id comes from the verified JWT (server.py).
     if not account_id:
-        # Fall back to the tenant's primary/first account. sme_id comes from the
-        # verified JWT (server.py); env DEFAULT_SME_ID is a legacy last resort.
-        owner_sme_id = sme_id or os.getenv("DEFAULT_SME_ID")
-        account_query = supabase.table("bank_account").select("account_id")
-        if owner_sme_id:
-            account_query = account_query.eq("sme_id", owner_sme_id)
-        # Prefer the primary account when falling back.
-        account_res = account_query.order("is_primary", desc=True).limit(1).execute()
+        if not sme_id:
+            logger.error("No account_id or sme_id provided; cannot link statement.")
+            return None
+        account_res = (
+            supabase.table("bank_account")
+            .select("account_id")
+            .eq("sme_id", sme_id)
+            .order("is_primary", desc=True)
+            .limit(1)
+            .execute()
+        )
         if not account_res.data:
-            account_res = supabase.table("bank_account").select("account_id").limit(1).execute()
-        if not account_res.data:
-            logger.error("No bank accounts found! Cannot link statement.")
+            logger.error("No bank account for SME %s; cannot link statement.", sme_id)
             return None
         account_id = account_res.data[0]["account_id"]
 
@@ -338,31 +338,7 @@ def upload_parsed_statement(
         )
         logger.info(f"Successfully upserted {len(response.data)} transactions to DB.")
         return response.data
-        
+
     except Exception as exc:
         logger.exception("Failed to upload transactions to Supabase.")
         raise
-
-# --- TESTING EXECUTION ---
-if __name__ == "__main__":
-    print("--- STARTING PARSE ---")
-    result = parse_bank_statement(
-        file_path="statement2.csv", 
-        local_currency="MYR"
-    )
-
-    print(json.dumps(result, indent=2))
-
-    print("--- STARTING UPLOAD ---")
-
-    # Generating a fresh UUID so the test script won't crash on duplicates
-    import uuid
-    test_id = str(uuid.uuid4())
-    
-    upload_result = upload_parsed_statement(
-        parsed_result=result, 
-        statement_id=test_id, 
-        supabase=supabase
-    )
-
-    print("Upload complete!")

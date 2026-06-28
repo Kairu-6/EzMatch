@@ -1,3 +1,4 @@
+import logging
 import os
 import fitz  # PyMuPDF
 from supabase import create_client, Client
@@ -12,6 +13,7 @@ from data_contracts import (
 from parser_llm import ocr_image, structure
 
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 # ══════════════════════════════════════════════════════════════════
 # SUPABASE
@@ -36,7 +38,7 @@ Example: {"parsed_amount":1250.0,"parsed_currency":"MYR","parsed_date":"2026-10-
 # IMAGE PARSER (Tesseract OCR -> Morpheus)
 # ══════════════════════════════════════════════════════════════════
 def extract_proof_image(input_data: ChutesParserInput) -> ChutesParserOutput:
-    print(f"--> [OCR] Reading proof image: {input_data.file_path}")
+    logger.info("OCR proof image: %s", input_data.file_path)
     try:
         file_bytes = supabase.storage.from_("proofs").download(input_data.file_path)
         text = ocr_image(file_bytes)
@@ -64,7 +66,7 @@ def extract_proof_image(input_data: ChutesParserInput) -> ChutesParserOutput:
 # PDF PARSER (PyMuPDF text -> Morpheus)
 # ══════════════════════════════════════════════════════════════════
 def extract_proof_pdf(input_data: ChutesParserInput) -> ChutesParserOutput:
-    print(f"--> [PDF] Extracting proof text: {input_data.file_path}")
+    logger.info("Extract proof PDF: %s", input_data.file_path)
     try:
         file_bytes = supabase.storage.from_("proofs").download(input_data.file_path)
         if not file_bytes:
@@ -100,8 +102,6 @@ def extract_proof_pdf(input_data: ChutesParserInput) -> ChutesParserOutput:
 # ══════════════════════════════════════════════════════════════════
 def process_payment_proof(proof_id: str, file_path: str, file_type: str):
     """Handle the lifecycle of an uploaded payment proof."""
-    print(f"\n--- PROOF ORCHESTRATOR START (id={proof_id}) ---")
-
     parser_input = ChutesParserInput(
         proof_id=proof_id, file_path=file_path, file_type=file_type
     )
@@ -121,9 +121,7 @@ def process_payment_proof(proof_id: str, file_path: str, file_type: str):
         )
 
     if output.status == ParseStatus.FAILED:
-        print(f"[PARSE ERROR]: {output.message}")
-    else:
-        print(f"[AI Extraction Status]: {output.status.upper()}")
+        logger.warning("Proof %s parse failed: %s", proof_id, output.message)
 
     update_payload = {
         "parse_status": output.status.value,
@@ -143,21 +141,8 @@ def process_payment_proof(proof_id: str, file_path: str, file_type: str):
             .eq("proof_id", output.proof_id)
             .execute()
         )
-        print(f"Supabase update OK for proof_id: {proof_id}")
-        print("--- PROOF ORCHESTRATOR END ---\n")
+        logger.info("Proof %s updated.", proof_id)
         return response.data
     except Exception as db_error:
-        print(f"[DB ERROR] Failed to update proof {proof_id}: {db_error}")
-        print("--- PROOF ORCHESTRATOR END ---\n")
+        logger.error("Failed to update proof %s: %s", proof_id, db_error)
         return None
-
-
-if __name__ == "__main__":
-    import uuid
-    test_proof_id = str(uuid.uuid4())
-    print(f"[SETUP] Inserting dummy row for proof_id: {test_proof_id}")
-    supabase.table("payment_proof").insert(
-        {"proof_id": test_proof_id, "parse_status": "pending", "file_type": "pdf", "file_path": "test_proof.pdf"}
-    ).execute()
-    result = process_payment_proof(proof_id=test_proof_id, file_path="test_proof.pdf", file_type="pdf")
-    print("[DB Result]:", result)

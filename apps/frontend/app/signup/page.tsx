@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { Field } from "../components/ui/Field";
 import { Button } from "../components/ui/Button";
+import { MeshBackground } from "../components/MeshBackground";
 import { supabase } from "../lib/supabaseClient";
 
 const valueProps = [
@@ -72,15 +73,21 @@ export default function SignUpPage() {
   return (
     <div className="min-h-screen grid lg:grid-cols-2 bg-bg">
       {/* Brand panel */}
-      <aside className="hidden lg:flex flex-col justify-between bg-surface-2 border-r border-border p-12">
-        <div className="flex items-center gap-2.5">
+      <aside className="relative overflow-hidden hidden lg:flex flex-col justify-between bg-surface-2 border-r border-border p-12">
+        <MeshBackground variant="auth" />
+        <div className="relative z-10 flex flex-col justify-between h-full">
+        <Link
+          href="/"
+          aria-label="TreasuryFlow AI home"
+          className="flex items-center gap-2.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-accent w-fit"
+        >
           <span className="flex items-center justify-center w-8 h-8 rounded-md bg-accent text-accent-fg">
             <Landmark className="w-4.5 h-4.5" />
           </span>
           <span className="font-semibold text-ink tracking-tight">
             TreasuryFlow <span className="text-ink-muted font-normal">AI</span>
           </span>
-        </div>
+        </Link>
 
         <div className="max-w-md space-y-6">
           <h2 className="text-2xl font-semibold text-ink leading-snug">
@@ -99,17 +106,22 @@ export default function SignUpPage() {
         <p className="text-sm text-ink-subtle">
           Built for finance teams at growing SMEs.
         </p>
+        </div>
       </aside>
 
       {/* Form */}
       <main className="flex items-center justify-center p-6 sm:p-12">
         <div className="w-full max-w-sm">
-          <div className="lg:hidden flex items-center gap-2.5 mb-8">
+          <Link
+            href="/"
+            aria-label="TreasuryFlow AI home"
+            className="lg:hidden flex items-center gap-2.5 mb-8 w-fit rounded-md outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          >
             <span className="flex items-center justify-center w-8 h-8 rounded-md bg-accent text-accent-fg">
               <Landmark className="w-4.5 h-4.5" />
             </span>
             <span className="font-semibold text-ink">TreasuryFlow AI</span>
-          </div>
+          </Link>
 
           {success ? (
             <div className="flex flex-col items-center text-center gap-4 py-8">

@@ -202,13 +202,8 @@ Example:
 ]
 """
 
-# ✅ FIX 2: Super Debug Mode for API Call
 def _call_morpheus(prompt: str) -> list[MorpheusMatchProposal]:
-    print("\n" + "="*60)
-    print("🤖 [DEBUG] SENDING PROMPT TO MORPHEUS:")
-    print("="*60)
-    print(prompt)
-    print("="*60 + "\n")
+    logger.debug("Morpheus prompt:\n%s", prompt)
 
     headers = {
         "Content-Type":  "application/json",
@@ -219,30 +214,18 @@ def _call_morpheus(prompt: str) -> list[MorpheusMatchProposal]:
         "messages": [{"role": "user", "content": prompt}],
         "stream":   False,
     }
-    
+
     target_url = MORPHEUS_URL
     if not target_url.endswith("/chat/completions"):
         target_url = f"{target_url.rstrip('/')}/chat/completions"
-        
-    print(f"⏳ Waiting for Morpheus to respond at {target_url}...")
-    print(f"🧠 Using Model: {MORPHEUS_MODEL}")
-    print("⏱️  Timeout set to 180 seconds. Please wait...")
-    
-    # HARDCODED TIMEOUT TO 180 SECONDS
+
     response = httpx.post(target_url, json=payload, headers=headers, timeout=180.0)
-    
-    print(f"⚡ Status Code: {response.status_code}")
     response.raise_for_status()
 
     raw_text = response.json()["choices"][0]["message"]["content"].strip()
-    
-    print("\n" + "="*60)
-    print("💬 [DEBUG] RAW RESPONSE FROM MORPHEUS:")
-    print("="*60)
-    print(raw_text)
-    print("="*60 + "\n")
+    logger.debug("Morpheus raw response:\n%s", raw_text)
 
-    # ✅ FIX 3: Bulletproof JSON cleaner (strips markdown formatting)
+    # Strip markdown code fences if present.
     if raw_text.startswith("```"):
         lines = raw_text.splitlines()
         if lines[0].startswith("```"):
@@ -257,7 +240,7 @@ def _call_morpheus(prompt: str) -> list[MorpheusMatchProposal]:
         parsed_json = json.loads(raw_text)
         return [MorpheusMatchProposal(**p) for p in parsed_json]
     except json.JSONDecodeError as e:
-        print(f"❌ CRITICAL PARSING ERROR: Morpheus did not return valid JSON. Error: {e}")
+        logger.error("Morpheus did not return valid JSON: %s", e)
         raise
 
 # Step 5: Write matches

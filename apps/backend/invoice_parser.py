@@ -1,5 +1,5 @@
+import logging
 import os
-import json
 from pydantic import BaseModel, field_validator
 from enum import Enum
 import fitz  # PyMuPDF
@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from parser_llm import ocr_image, structure
 
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 # ══════════════════════════════════════════════════════════════════
 # 1. SUPABASE
@@ -68,7 +69,7 @@ class InvoiceParserOutput(BaseModel):
 # 3A. IMAGE PARSER (Tesseract OCR -> Morpheus)
 # ══════════════════════════════════════════════════════════════════
 def extract_invoice_image(input_data: InvoiceParserInput) -> InvoiceParserOutput:
-    print(f"--> [OCR] Reading invoice image: {input_data.file_path}")
+    logger.info("OCR invoice image: %s", input_data.file_path)
     try:
         file_bytes = supabase.storage.from_("invoices").download(input_data.file_path)
         text = ocr_image(file_bytes)
@@ -92,7 +93,7 @@ def extract_invoice_image(input_data: InvoiceParserInput) -> InvoiceParserOutput
 # 3B. PDF PARSER (PyMuPDF text -> Morpheus)
 # ══════════════════════════════════════════════════════════════════
 def extract_invoice_pdf(input_data: InvoiceParserInput) -> InvoiceParserOutput:
-    print(f"--> [PDF] Extracting invoice text: {input_data.file_path}")
+    logger.info("Extract invoice PDF: %s", input_data.file_path)
     try:
         file_bytes = supabase.storage.from_("invoices").download(input_data.file_path)
         if not file_bytes:
@@ -124,8 +125,6 @@ def extract_invoice_pdf(input_data: InvoiceParserInput) -> InvoiceParserOutput:
 # ══════════════════════════════════════════════════════════════════
 def process_invoice(invoice_id: str, file_path: str, file_type: str):
     """Handle the lifecycle of an uploaded invoice."""
-    print(f"\n--- INVOICE ORCHESTRATOR START (id={invoice_id}) ---")
-
     parser_input = InvoiceParserInput(
         invoice_id=invoice_id, file_path=file_path, file_type=file_type
     )
@@ -144,9 +143,8 @@ def process_invoice(invoice_id: str, file_path: str, file_type: str):
             message=f"Parser exception: {str(e)}",
         )
 
-    print(f"[AI Extraction Status]: {output.status.upper()}")
     if output.status == ParseStatus.FAILED:
-        print(f"[PARSE ERROR]: {output.message}")
+        logger.warning("Invoice %s parse failed: %s", invoice_id, output.message)
 
     # 1. Base payload
     update_payload = {"status": "pending"}
@@ -184,19 +182,8 @@ def process_invoice(invoice_id: str, file_path: str, file_type: str):
         except Exception:
             update_payload.pop("error_message", None)
             response = _do_update(update_payload)
-        print("Supabase update OK.")
-        print("--- INVOICE ORCHESTRATOR END ---\n")
+        logger.info("Invoice %s updated.", output.invoice_id)
         return response.data
     except Exception as db_error:
-        print(f"[DB ERROR] Failed to update invoice: {db_error}")
-        print("--- INVOICE ORCHESTRATOR END ---\n")
+        logger.error("Failed to update invoice %s: %s", output.invoice_id, db_error)
         return None
-
-
-if __name__ == "__main__":
-    import uuid
-    test_invoice_id = str(uuid.uuid4())
-    print(f"[SETUP] Inserting dummy row for invoice_id: {test_invoice_id}")
-    supabase.table("invoice").insert({"invoice_id": test_invoice_id, "status": "pending"}).execute()
-    result = process_invoice(invoice_id=test_invoice_id, file_path="test_invoice.pdf", file_type="pdf")
-    print(result)

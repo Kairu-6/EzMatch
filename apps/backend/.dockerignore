@@ -1,0 +1,12 @@
+# The local venv is Windows-only and huge — never ship it; deps install fresh.
+venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+# Secrets stay out of the image; set them as platform env vars instead.
+.env
+.env.*
+!.env.example
+# Local scratch / temp upload artifacts.
+temp_*
+*.log

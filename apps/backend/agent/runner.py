@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 from supabase import create_client
 
 import orchestrator
-from agent import llm, prompts
+from agent import llm, prompts, verifier, anomaly
 from agent import tools as tools_mod
 from agent.memory import AgentMemory, load_learned
 
@@ -160,6 +160,22 @@ def run_agent(sme_id: str, mode: str = "auto") -> dict:
     except _Finish as f:
         mem.persist("agent_finished", str(f.finish_args.get("summary", "Done.")),
                     {"finish": f.finish_args}, phase="advise")
+
+    # Governed verification pass — runs even if the model skipped its VERIFY phase.
+    # Must never fail the job; a verifier error is logged, not raised.
+    try:
+        verifier.run_verification(db, job_id, sme_id, ctx, mem, apply=True)
+    except Exception as exc:
+        logger.exception("Verifier pass failed.")
+        mem.persist("verify_error", f"Verification skipped: {exc}", phase="verify")
+
+    # Anomaly/fraud scan — runs after verification, can escalate high-severity
+    # signals. Also non-fatal: a detector error is logged, never raised.
+    try:
+        anomaly.scan_anomalies(db, job_id, sme_id, ctx, mem, apply=True)
+    except Exception as exc:
+        logger.exception("Anomaly scan failed.")
+        mem.persist("anomaly_error", f"Anomaly scan skipped: {exc}", phase="verify")
 
     return _finalise(db, job_id, sme_id, ctx)
 

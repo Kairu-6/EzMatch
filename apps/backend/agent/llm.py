@@ -29,10 +29,12 @@ logger = logging.getLogger(__name__)
 
 MORPHEUS_URL     = os.getenv("MORPHEUS_URL")
 MORPHEUS_API_KEY = os.getenv("MORPHEUS_API_KEY")
-# The high-end agent model. Default = the confirmed-working text model on this
-# account; qwen kept as the documented fallback. One swappable env var.
-AGENT_MODEL      = os.getenv("MORPHEUS_AGENT_MODEL", "llama-3.3-70b")
-TOOLS_MODE_ENV   = os.getenv("MORPHEUS_AGENT_TOOLS", "auto").lower()   # auto | native | react
+# The high-end agent model. minimax-m2.5 is purpose-built for agentic tool
+# orchestration (198K context, function-calling, reasoning) and on this account
+# drives the loop in NATIVE tool-calling mode with the best summaries we've seen.
+# llama-3.3-70b is a proven fallback (also native). One swappable env var.
+AGENT_MODEL      = os.getenv("MORPHEUS_AGENT_MODEL", "minimax-m2.5")
+TOOLS_MODE_ENV   = os.getenv("MORPHEUS_AGENT_TOOLS", "native").lower()   # auto | native | react
 CALL_TIMEOUT     = float(os.getenv("AGENT_LLM_TIMEOUT", "120"))
 TEMPERATURE      = float(os.getenv("AGENT_TEMPERATURE", "0.0"))
 

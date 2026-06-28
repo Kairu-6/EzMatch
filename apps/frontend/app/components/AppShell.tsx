@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "../lib/AuthContext";
 import { ToastProvider } from "./ui/Toast";
+import { MeshBackground } from "./MeshBackground";
 import { cn } from "./ui/cn";
 
 const AUTH_ROUTES = ["/login", "/signup"];
@@ -357,13 +358,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <ToastProvider>
-      <div className="flex flex-col h-screen w-screen overflow-hidden bg-bg text-ink">
-        <TopNav />
-        <main className="flex-1 overflow-y-auto">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 lg:py-8 pb-24">
-            {children}
-          </div>
-        </main>
+      <div className="relative flex flex-col h-screen w-screen overflow-hidden bg-bg text-ink">
+        {/* Faint shared motive — sits behind the nav + content. */}
+        <MeshBackground variant="app" />
+        <div className="relative z-10 flex flex-col flex-1 min-h-0">
+          <TopNav />
+          <main className="flex-1 overflow-y-auto">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 lg:py-8 pb-24">
+              {children}
+            </div>
+          </main>
+        </div>
       </div>
       <style>{`
         @keyframes fade-in{from{opacity:0}to{opacity:1}}

@@ -33,10 +33,12 @@ from orchestrator import run_reconciliation
 
 load_dotenv()
 
-# Agentic reconciliation toggle. When true, /api/reconcile runs the tool-using
-# agent loop (agent/runner.py); when false it runs the legacy linear pipeline.
-# Same DB contract either way, so /api/job-status + the dashboard are unchanged.
-USE_AGENT = os.getenv("USE_AGENT", "false").lower() == "true"
+# Agentic reconciliation is the DEFAULT. /api/reconcile runs the tool-using agent
+# loop (agent/runner.py); set USE_AGENT=false to force the legacy linear pipeline.
+# Either way the DB contract is identical, so /api/job-status + the dashboard are
+# unchanged. The agent also auto-falls back to the legacy pipeline if the model is
+# unreachable at job start (AGENT_FALLBACK_LEGACY).
+USE_AGENT = os.getenv("USE_AGENT", "true").lower() == "true"
 
 if USE_AGENT:
     from agent.runner import run_agent

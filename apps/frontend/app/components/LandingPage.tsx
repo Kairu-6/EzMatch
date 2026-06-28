@@ -1,8 +1,12 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Landmark, ArrowRight, FileText, Banknote, Receipt, Zap } from "lucide-react";
+import {
+  Landmark, ArrowRight, FileText, Banknote, Receipt, Zap,
+  AlertTriangle, Hourglass, ArrowRightLeft, XCircle, CheckCircle2,
+} from "lucide-react";
+import { MeshBackground } from "./MeshBackground";
 
 // Always-dark surface — OKLCH values hardcoded (not token-driven).
 // Theme: deep indigo "tech" (Flex-IT inspired) — refined, not neon.
@@ -45,168 +49,204 @@ const STEPS = [
   },
 ];
 
-// Low-poly mesh — indigo hue 273, refined navy tones (brighter top-right
-// where the purple hero wash sits, like the reference's diagonal split).
-const TRIS = [
-  // Top strip
-  { pts: "0,0 180,0 90,95", l: 0.150 },
-  { pts: "180,0 420,0 300,95", l: 0.158 },
-  { pts: "420,0 660,0 540,95", l: 0.148 },
-  { pts: "660,0 900,0 780,95", l: 0.168 },
-  { pts: "900,0 1140,0 1020,95", l: 0.176 },
-  { pts: "1140,0 1380,0 1260,95", l: 0.188 },
-  { pts: "1380,0 1440,0 1440,95", l: 0.180 },
-  { pts: "0,0 90,95 0,95", l: 0.168 },
-  { pts: "180,0 300,95 90,95", l: 0.158 },
-  { pts: "420,0 540,95 300,95", l: 0.150 },
-  { pts: "660,0 780,95 540,95", l: 0.172 },
-  { pts: "900,0 1020,95 780,95", l: 0.182 },
-  { pts: "1140,0 1260,95 1020,95", l: 0.192 },
-  { pts: "1380,0 1440,95 1260,95", l: 0.200 },
-  // Second strip
-  { pts: "0,95 90,95 0,195", l: 0.158 },
-  { pts: "90,95 300,95 200,195", l: 0.148 },
-  { pts: "300,95 540,95 440,195", l: 0.162 },
-  { pts: "540,95 780,95 680,195", l: 0.158 },
-  { pts: "780,95 1020,95 920,195", l: 0.172 },
-  { pts: "1020,95 1260,95 1160,195", l: 0.182 },
-  { pts: "1260,95 1440,95 1440,195", l: 0.190 },
-  { pts: "0,195 200,195 90,95", l: 0.166 },
-  { pts: "200,195 440,195 300,95", l: 0.152 },
-  { pts: "440,195 680,195 540,95", l: 0.148 },
-  { pts: "680,195 920,195 780,95", l: 0.166 },
-  { pts: "920,195 1160,195 1020,95", l: 0.176 },
-  { pts: "1160,195 1440,195 1260,95", l: 0.186 },
-  // Third strip
-  { pts: "0,195 200,195 110,295", l: 0.150 },
-  { pts: "200,195 440,195 350,295", l: 0.160 },
-  { pts: "440,195 680,195 590,295", l: 0.148 },
-  { pts: "680,195 920,195 830,295", l: 0.164 },
-  { pts: "920,195 1160,195 1070,295", l: 0.170 },
-  { pts: "1160,195 1440,195 1440,295", l: 0.178 },
-  { pts: "0,295 110,295 200,195", l: 0.162 },
-  { pts: "110,295 350,295 200,195", l: 0.152 },
-  { pts: "350,295 590,295 440,195", l: 0.146 },
-  { pts: "590,295 830,295 680,195", l: 0.158 },
-  { pts: "830,295 1070,295 920,195", l: 0.166 },
-  { pts: "1070,295 1440,295 1160,195", l: 0.172 },
-  // Fourth strip
-  { pts: "0,295 110,295 0,395", l: 0.154 },
-  { pts: "110,295 350,295 220,395", l: 0.146 },
-  { pts: "350,295 590,295 460,395", l: 0.158 },
-  { pts: "590,295 830,295 700,395", l: 0.148 },
-  { pts: "830,295 1070,295 940,395", l: 0.158 },
-  { pts: "1070,295 1440,295 1440,395", l: 0.164 },
-  { pts: "0,395 220,395 110,295", l: 0.160 },
-  { pts: "220,395 460,395 350,295", l: 0.150 },
-  { pts: "460,395 700,395 590,295", l: 0.144 },
-  { pts: "700,395 940,395 830,295", l: 0.154 },
-  { pts: "940,395 1440,395 1070,295", l: 0.160 },
-  // Fifth strip
-  { pts: "0,395 220,395 130,495", l: 0.148 },
-  { pts: "220,395 460,395 370,495", l: 0.142 },
-  { pts: "460,395 700,395 610,495", l: 0.152 },
-  { pts: "700,395 940,395 850,495", l: 0.148 },
-  { pts: "940,395 1440,395 1440,495", l: 0.156 },
-  { pts: "0,495 130,495 220,395", l: 0.154 },
-  { pts: "130,495 370,495 220,395", l: 0.146 },
-  { pts: "370,495 610,495 460,395", l: 0.140 },
-  { pts: "610,495 850,495 700,395", l: 0.150 },
-  { pts: "850,495 1440,495 940,395", l: 0.154 },
-  // Sixth strip
-  { pts: "0,495 130,495 0,595", l: 0.150 },
-  { pts: "130,495 370,495 240,595", l: 0.142 },
-  { pts: "370,495 610,495 480,595", l: 0.148 },
-  { pts: "610,495 850,495 720,595", l: 0.142 },
-  { pts: "850,495 1440,495 1440,595", l: 0.150 },
-  { pts: "0,595 240,595 130,495", l: 0.156 },
-  { pts: "240,595 480,595 370,495", l: 0.146 },
-  { pts: "480,595 720,595 610,495", l: 0.140 },
-  { pts: "720,595 1440,595 850,495", l: 0.148 },
-  // Bottom
-  { pts: "0,595 0,760 240,595", l: 0.148 },
-  { pts: "0,760 480,760 240,595", l: 0.142 },
-  { pts: "480,760 720,760 480,595", l: 0.146 },
-  { pts: "480,760 720,595 720,760", l: 0.140 },
-  { pts: "720,760 1440,760 720,595", l: 0.146 },
-  { pts: "720,760 1440,595 1440,760", l: 0.144 },
+// Agitate — industry-standard pain points of manual reconciliation.
+const PAIN_POINTS = [
+  {
+    Icon: AlertTriangle,
+    title: "3-5% revenue leakage",
+    body: "Human error in manual spreadsheet matching leads to unrecorded variances and lost capital.",
+  },
+  {
+    Icon: Hourglass,
+    title: "15+ hours wasted weekly",
+    body: "Finance teams spend days matching line items instead of analyzing strategic growth.",
+  },
+  {
+    Icon: ArrowRightLeft,
+    title: "Untracked FX spreads",
+    body: "Hidden banking fees and fluctuating exchange rates create discrepancies in expected revenue.",
+  },
 ];
 
-// Soft accent edges — blue near the hero, a couple purple ones top-right
-// to echo the reference's blue→purple split. Subtle, not neon.
-const GLOW_LINES = [
-  { x1: 90,   y1: 95,  x2: 200, y2: 195, o: 0.48, c: "0.71 0.15 242" },
-  { x1: 0,    y1: 195, x2: 110, y2: 295, o: 0.40, c: "0.71 0.15 242" },
-  { x1: 350,  y1: 295, x2: 220, y2: 395, o: 0.38, c: "0.71 0.15 242" },
-  { x1: 700,  y1: 395, x2: 610, y2: 495, o: 0.33, c: "0.71 0.15 242" },
-  { x1: 1380, y1: 95,  x2: 1260, y2: 195, o: 0.43, c: "0.60 0.17 295" },
-  { x1: 1160, y1: 195, x2: 1070, y2: 295, o: 0.35, c: "0.60 0.17 295" },
-  { x1: 1020, y1: 95,  x2: 920, y2: 195, o: 0.30, c: "0.62 0.16 280" },
+// Solve — old-way vs new-way comparison rows (illustrative).
+const OLD_WAY = ["Row 42: FX mismatch", "Unidentified wire fee", "14 hours remaining"];
+const NEW_WAY = [
+  "Matched RM 11,226 · Invoice #902",
+  "Auto-resolved $15 intermediary fee",
+  "Reconciliation complete in 0.4s",
 ];
 
-function PolyMesh() {
+// Scroll-reveal via IntersectionObserver (no scroll listener). Fires once.
+// Reduced-motion users are treated as already-revealed, with no transition.
+function useInView(threshold = 0.2) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [inView, setInView] = useState(false);
+  const [reduce, setReduce] = useState(false);
+
+  useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setReduce(true);
+      setInView(true);
+      return;
+    }
+    const el = ref.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) {
+            setInView(true);
+            io.disconnect();
+            break;
+          }
+        }
+      },
+      { threshold },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [threshold]);
+
+  return { ref, inView, reduce };
+}
+
+// Reveal — fades + lifts its children once they scroll into view (staggered by `delay`).
+function Reveal({
+  children,
+  delay = 0,
+  className,
+}: {
+  children: React.ReactNode;
+  delay?: number;
+  className?: string;
+}) {
+  const { ref, inView, reduce } = useInView();
   return (
-    <svg
-      aria-hidden
-      className="absolute inset-0 w-full h-full"
-      viewBox="0 0 1440 760"
-      preserveAspectRatio="xMidYMid slice"
-      xmlns="http://www.w3.org/2000/svg"
+    <div
+      ref={ref}
+      className={className}
+      style={
+        reduce
+          ? undefined
+          : {
+              opacity: inView ? 1 : 0,
+              transform: inView ? "translateY(0)" : "translateY(20px)",
+              transition: `opacity 0.6s ease-out ${delay}ms, transform 0.6s ease-out ${delay}ms`,
+            }
+      }
     >
-      <defs>
-        {/* Purple-indigo wash in the upper-right — the reference's hero glow */}
-        <radialGradient id="lp-purple" cx="82%" cy="14%" r="62%">
-          <stop offset="0%"   stopColor="oklch(0.50 0.19 295)" stopOpacity="0.38" />
-          <stop offset="45%"  stopColor="oklch(0.38 0.15 288)" stopOpacity="0.13" />
-          <stop offset="100%" stopColor="oklch(0.15 0.045 273)" stopOpacity="0" />
-        </radialGradient>
-        {/* Soft blue ambient lower-left to balance the composition */}
-        <radialGradient id="lp-blue" cx="12%" cy="58%" r="50%">
-          <stop offset="0%"   stopColor="oklch(0.52 0.16 250)" stopOpacity="0.15" />
-          <stop offset="100%" stopColor="transparent" stopOpacity="0" />
-        </radialGradient>
-        {/* Gentle single-pass glow — refined, not neon */}
-        <filter id="lp-soft" x="-60%" y="-60%" width="220%" height="220%">
-          <feGaussianBlur in="SourceGraphic" stdDeviation="2" result="b" />
-          <feMerge>
-            <feMergeNode in="b" />
-            <feMergeNode in="SourceGraphic" />
-          </feMerge>
-        </filter>
-      </defs>
+      {children}
+    </div>
+  );
+}
 
-      {/* Darkest base — deep indigo */}
-      <rect width="1440" height="760" fill="oklch(0.135 0.042 274)" />
+// Functional ROI calculator. Assumptions are illustrative and shown to the user.
+function RoiCalculator() {
+  const [hours, setHours] = useState(15);
+  const AUTOMATION = 0.9; // share of manual matching automated
+  const RATE = 45; // RM/hr, fully-loaded finance cost
+  const WEEKS = 48; // working weeks/year
+  const hoursSavedYear = Math.round(hours * AUTOMATION * WEEKS);
+  const costSaved = hoursSavedYear * RATE;
+  const fmt = (n: number) => n.toLocaleString("en-MY");
 
-      {/* Triangle mesh faces — indigo navy */}
-      {TRIS.map((t, i) => (
-        <polygon
-          key={i}
-          points={t.pts}
-          fill={`oklch(${t.l} 0.045 273)`}
-          stroke="oklch(0.27 0.055 272)"
-          strokeWidth="0.7"
-          strokeOpacity="0.69"
-        />
-      ))}
+  return (
+    <div className="lp-panel rounded-xl p-6 sm:p-8 max-w-3xl mx-auto">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-10 items-center">
+        {/* Control */}
+        <div>
+          <label
+            htmlFor="lp-roi"
+            className="block text-sm font-medium mb-1"
+            style={{ color: "oklch(0.89 0.008 260)" }}
+          >
+            Hours spent on manual reconciliation each week
+          </label>
+          <p className="text-xs mb-5" style={{ color: "oklch(0.55 0.018 268)" }}>
+            Drag to estimate what TreasuryFlow AI could give back.
+          </p>
+          <input
+            id="lp-roi"
+            type="range"
+            min={2}
+            max={40}
+            step={1}
+            value={hours}
+            onChange={(e) => setHours(Number(e.target.value))}
+            className="lp-range"
+            aria-valuetext={`${hours} hours per week`}
+          />
+          <div className="mt-3 flex items-baseline gap-1.5">
+            <span
+              style={{
+                fontFamily: "var(--font-jetbrains-mono), monospace",
+                fontSize: "1.5rem",
+                color: "oklch(0.71 0.15 242)",
+              }}
+            >
+              {hours}
+            </span>
+            <span className="text-sm" style={{ color: "oklch(0.61 0.020 266)" }}>
+              hours / week
+            </span>
+          </div>
+        </div>
 
-      {/* Glow overlays */}
-      <rect width="1440" height="760" fill="url(#lp-purple)" />
-      <rect width="1440" height="760" fill="url(#lp-blue)" />
+        {/* Output */}
+        <div className="flex flex-col gap-5">
+          <div>
+            <p className="text-xs mb-1.5" style={{ color: "oklch(0.55 0.018 268)" }}>
+              Estimated hours saved / year
+            </p>
+            <p
+              style={{
+                fontFamily: "var(--font-jetbrains-mono), monospace",
+                fontSize: "2rem",
+                lineHeight: 1,
+                color: "oklch(0.85 0.10 150)",
+              }}
+            >
+              {fmt(hoursSavedYear)}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs mb-1.5" style={{ color: "oklch(0.55 0.018 268)" }}>
+              Estimated cost recovered / year
+            </p>
+            <p
+              style={{
+                fontFamily: "var(--font-jetbrains-mono), monospace",
+                fontSize: "2rem",
+                lineHeight: 1,
+                color: "oklch(0.85 0.10 150)",
+              }}
+            >
+              RM {fmt(costSaved)}
+            </p>
+          </div>
+        </div>
+      </div>
 
-      {/* Soft accent edges (per-line color) */}
-      {GLOW_LINES.map((l, i) => (
-        <line
-          key={i}
-          x1={l.x1} y1={l.y1}
-          x2={l.x2} y2={l.y2}
-          stroke={`oklch(${l.c})`}
-          strokeWidth="1.4"
-          strokeOpacity={l.o}
-          filter="url(#lp-soft)"
-        />
-      ))}
-    </svg>
+      <div
+        className="mt-7 pt-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
+        style={{ borderTop: "1px solid oklch(0.30 0.055 272 / 0.65)" }}
+      >
+        <p
+          className="text-xs leading-relaxed"
+          style={{ color: "oklch(0.49 0.018 268)", maxWidth: "46ch" }}
+        >
+          Estimate only. Assumes about 90% of matching automated, at RM 45 per hour
+          fully-loaded cost, across 48 working weeks.
+        </p>
+        <Link
+          href="/signup"
+          className="lp-btn-primary inline-flex items-center justify-center gap-2 px-6 h-11 rounded-md text-sm font-medium shrink-0 outline-none focus-visible:ring-2"
+        >
+          Get started
+          <ArrowRight className="w-4 h-4" aria-hidden />
+        </Link>
+      </div>
+    </div>
   );
 }
 
@@ -257,23 +297,80 @@ export function LandingPage() {
           box-shadow: 0 0 14px oklch(0.55 0.16 250 / 0.10);
         }
 
+        /* Pain-point cards — same glass family as .lp-step */
+        .lp-card {
+          background: oklch(0.19 0.045 272 / 0.70);
+          border: 1px solid oklch(0.30 0.055 272 / 0.65);
+          transition: background 150ms ease-out, border-color 150ms ease-out,
+                      transform 150ms ease-out, box-shadow 150ms ease-out;
+        }
+        .lp-card:hover {
+          background: oklch(0.22 0.050 272 / 0.85);
+          border-color: oklch(0.50 0.14 252 / 0.55);
+          transform: translateY(-2px);
+          box-shadow: 0 0 22px oklch(0.55 0.16 250 / 0.12);
+        }
+
+        /* Comparison + calculator panels */
+        .lp-panel {
+          background: oklch(0.185 0.044 272 / 0.55);
+          border: 1px solid oklch(0.30 0.055 272 / 0.65);
+        }
+
+        /* Range slider — themed in the page accent blue */
+        .lp-range {
+          -webkit-appearance: none;
+          appearance: none;
+          width: 100%;
+          height: 6px;
+          border-radius: 999px;
+          background: oklch(0.30 0.055 272 / 0.85);
+          outline: none;
+        }
+        .lp-range::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          appearance: none;
+          width: 20px;
+          height: 20px;
+          border-radius: 50%;
+          background: oklch(0.62 0.17 250);
+          border: 2px solid oklch(0.85 0.10 245);
+          cursor: pointer;
+          box-shadow: 0 0 12px oklch(0.58 0.17 250 / 0.45);
+          transition: transform 120ms ease-out;
+        }
+        .lp-range::-webkit-slider-thumb:hover { transform: scale(1.12); }
+        .lp-range::-moz-range-thumb {
+          width: 20px;
+          height: 20px;
+          border-radius: 50%;
+          background: oklch(0.62 0.17 250);
+          border: 2px solid oklch(0.85 0.10 245);
+          cursor: pointer;
+          box-shadow: 0 0 12px oklch(0.58 0.17 250 / 0.45);
+        }
+        .lp-range:focus-visible::-webkit-slider-thumb {
+          outline: 2px solid oklch(0.71 0.15 242);
+          outline-offset: 2px;
+        }
+        .lp-range:focus-visible::-moz-range-thumb {
+          outline: 2px solid oklch(0.71 0.15 242);
+          outline-offset: 2px;
+        }
+
         @media (prefers-reduced-motion: reduce) {
           .lp-reveal, .lp-reveal-item {
             transition: opacity 0.25s ease-out !important;
           }
           .lp-step:hover { transform: none; box-shadow: none; }
+          .lp-card:hover { transform: none; box-shadow: none; }
           .lp-btn-primary:hover { box-shadow: none; }
+          .lp-range::-webkit-slider-thumb:hover { transform: none; }
         }
       `}</style>
 
-      {/* Polygon mesh background */}
-      <div
-        className="absolute inset-0 overflow-hidden pointer-events-none"
-        aria-hidden
-        style={{ zIndex: 0 }}
-      >
-        <PolyMesh />
-      </div>
+      {/* Geometric motive — full-page fixed mesh + cursor glow. */}
+      <MeshBackground variant="landing" />
 
       {/* ── Navbar ─────────────────────────────────────────────── */}
       <header
@@ -287,7 +384,11 @@ export function LandingPage() {
         }}
       >
         {/* Logotype */}
-        <div className="flex items-center gap-2.5">
+        <Link
+          href="/"
+          aria-label="TreasuryFlow AI home"
+          className="flex items-center gap-2.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.71_0.15_242)]"
+        >
           <span
             className="flex items-center justify-center w-8 h-8 rounded-md shrink-0"
             style={{
@@ -307,7 +408,7 @@ export function LandingPage() {
             TreasuryFlow{" "}
             <span style={{ color: "oklch(0.49 0.018 268)", fontWeight: 400 }}>AI</span>
           </span>
-        </div>
+        </Link>
 
         {/* Nav */}
         <nav className="flex items-center gap-1" aria-label="Site navigation">
@@ -471,6 +572,184 @@ export function LandingPage() {
               </div>
 
             </div>
+          </div>
+        </section>
+
+        {/* ── Agitate: the cost of manual reconciliation ────────── */}
+        <section aria-labelledby="lp-pain-title" className="relative">
+          <div className="max-w-7xl mx-auto w-full px-5 sm:px-8 lg:px-12 py-20 lg:py-28">
+            <Reveal className="max-w-2xl mx-auto text-center">
+              <h2
+                id="lp-pain-title"
+                className="font-semibold leading-[1.15]"
+                style={{
+                  fontSize: "clamp(1.9rem, 3.6vw, 3rem)",
+                  color: "oklch(0.96 0.006 262)",
+                  letterSpacing: "-0.02em",
+                  textWrap: "balance",
+                }}
+              >
+                The silent cost of manual reconciliation.
+              </h2>
+              <p
+                className="mt-4 leading-relaxed mx-auto"
+                style={{
+                  fontSize: "1rem",
+                  color: "oklch(0.61 0.020 266)",
+                  maxWidth: "50ch",
+                }}
+              >
+                Cross-border commerce is complex. Managing it in spreadsheets is
+                quietly costing you margins.
+              </p>
+            </Reveal>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mt-12 lg:mt-16">
+              {PAIN_POINTS.map(({ Icon, title, body }, i) => (
+                <Reveal key={title} delay={i * 110} className="lp-card rounded-xl p-6 sm:p-7">
+                  <span
+                    className="flex items-center justify-center w-11 h-11 rounded-lg mb-5"
+                    style={{
+                      background: "oklch(0.26 0.09 262)",
+                      border: "1px solid oklch(0.45 0.12 255 / 0.40)",
+                    }}
+                    aria-hidden
+                  >
+                    <Icon className="w-5 h-5" style={{ color: "oklch(0.71 0.15 242)" }} />
+                  </span>
+                  <h3
+                    className="font-semibold text-lg mb-2"
+                    style={{ color: "oklch(0.92 0.008 260)" }}
+                  >
+                    {title}
+                  </h3>
+                  <p
+                    className="text-sm leading-relaxed"
+                    style={{ color: "oklch(0.61 0.020 266)" }}
+                  >
+                    {body}
+                  </p>
+                </Reveal>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* ── Solve: old way vs new way, plus ROI calculator ────── */}
+        <section aria-labelledby="lp-solve-title" className="relative">
+          <div className="max-w-7xl mx-auto w-full px-5 sm:px-8 lg:px-12 pb-20 lg:pb-28">
+            <Reveal className="max-w-2xl mx-auto text-center">
+              <h2
+                id="lp-solve-title"
+                className="font-semibold leading-[1.15]"
+                style={{
+                  fontSize: "clamp(1.9rem, 3.6vw, 3rem)",
+                  color: "oklch(0.96 0.006 262)",
+                  letterSpacing: "-0.02em",
+                  textWrap: "balance",
+                }}
+              >
+                Stop hunting for missing decimals.
+              </h2>
+              <p
+                className="mt-4 leading-relaxed mx-auto"
+                style={{
+                  fontSize: "1rem",
+                  color: "oklch(0.61 0.020 266)",
+                  maxWidth: "52ch",
+                }}
+              >
+                See how TreasuryFlow AI turns raw bank data into a clean, auditable
+                match.
+              </p>
+            </Reveal>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-12 lg:mt-16">
+              {/* Left: the old way */}
+              <Reveal className="lp-panel rounded-xl overflow-hidden">
+                <div
+                  className="px-5 py-3"
+                  style={{ borderBottom: "1px solid oklch(0.30 0.055 272 / 0.65)" }}
+                >
+                  <span
+                    className="text-xs font-medium"
+                    style={{ color: "oklch(0.61 0.020 266)" }}
+                  >
+                    The old way: spreadsheets
+                  </span>
+                </div>
+                <div
+                  className="p-4 sm:p-5 flex flex-col gap-2.5"
+                  style={{ fontFamily: "var(--font-jetbrains-mono), monospace" }}
+                >
+                  {OLD_WAY.map((t) => (
+                    <div
+                      key={t}
+                      className="flex items-center gap-3 px-3 py-2.5 rounded-md"
+                      style={{
+                        background: "oklch(0.33 0.08 25 / 0.14)",
+                        border: "1px solid oklch(0.50 0.15 25 / 0.30)",
+                      }}
+                    >
+                      <XCircle
+                        className="w-4 h-4 shrink-0"
+                        style={{ color: "oklch(0.72 0.16 25)" }}
+                        aria-hidden
+                      />
+                      <span
+                        className="text-xs sm:text-sm"
+                        style={{ color: "oklch(0.82 0.10 28)" }}
+                      >
+                        {t}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </Reveal>
+
+              {/* Right: the new way */}
+              <Reveal delay={120} className="lp-panel rounded-xl overflow-hidden">
+                <div
+                  className="px-5 py-3"
+                  style={{ borderBottom: "1px solid oklch(0.30 0.055 272 / 0.65)" }}
+                >
+                  <span
+                    className="text-xs font-medium"
+                    style={{ color: "oklch(0.71 0.15 242)" }}
+                  >
+                    The new way: TreasuryFlow AI
+                  </span>
+                </div>
+                <div className="p-4 sm:p-5 flex flex-col gap-2.5">
+                  {NEW_WAY.map((t) => (
+                    <div
+                      key={t}
+                      className="flex items-center gap-3 px-3 py-2.5 rounded-md"
+                      style={{
+                        background: "oklch(0.30 0.06 150 / 0.16)",
+                        border: "1px solid oklch(0.50 0.12 150 / 0.30)",
+                      }}
+                    >
+                      <CheckCircle2
+                        className="w-4 h-4 shrink-0"
+                        style={{ color: "oklch(0.72 0.13 150)" }}
+                        aria-hidden
+                      />
+                      <span
+                        className="text-xs sm:text-sm"
+                        style={{ color: "oklch(0.86 0.09 150)" }}
+                      >
+                        {t}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </Reveal>
+            </div>
+
+            <Reveal delay={80} className="mt-6">
+              <RoiCalculator />
+            </Reveal>
           </div>
         </section>
       </main>

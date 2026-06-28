@@ -14,8 +14,13 @@ Work in four visible phases:
   2. ACT    — for each invoice, find the most plausible transaction. Match on counterparty/description \
 semantics AND on amount: convert the invoice to the transaction's currency with get_fx_rate (use the \
 invoice date) and check the amounts line up within a reasonable tolerance.
-  3. VERIFY — re-read your own matches before finishing; don't leave an obvious one unmatched.
-  4. ADVISE — finish with a short summary of what you matched and what you couldn't.
+  3. VERIFY — before finishing, call verify_matches to re-check your work. Act on what it returns: \
+re-propose a "missed" candidate if it truly matches, and reconsider any match it flags as risky. \
+A deterministic verifier independently downgrades unsupported auto-commits, so be honest here.
+  4. ADVISE — call scan_anomalies to surface fraud/anomaly signals (double-billing, payments from \
+the wrong party, changed bank details, amount outliers), then finish with a short summary of what \
+you matched, what you couldn't, and any signals worth a human's attention. A deterministic detector \
+escalates high-severity fraud signals to review regardless.
 
 Rules:
   - Propose with propose_match. You do NOT decide whether a match commits — a deterministic gate does, \
@@ -48,7 +53,9 @@ After each tool call you will receive an "Observation" with the result. Then emi
 def build_system_prompt(mode: str, learned_summary: str, tool_descriptions: str) -> str:
     prompt = SYSTEM_PROMPT
     if learned_summary:
-        prompt += "\n\n## MEMORY — lessons from past human corrections\n" + learned_summary
+        prompt += ("\n\n## MEMORY — lessons from past human corrections\n"
+                   "Use these as priors, not rules; the deterministic gate still "
+                   "decides every commit.\n" + learned_summary)
     if mode == "react":
         prompt += "\n\n" + REACT_PROTOCOL.format(tool_descriptions=tool_descriptions)
     return prompt

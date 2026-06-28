@@ -43,10 +43,14 @@ Upload bank statements (CSV/XLSX), invoices (PDF/image), and payment proofs
 ## Backend `.env` keys
 `SUPABASE_URL`, `SUPABASE_API_KEY` (service_role), `MORPHEUS_URL`,
 `MORPHEUS_API_KEY`, `MORPHEUS_PARSE_MODEL` (=`llama-3.3-70b`),
-`DEFAULT_SME_ID` (=`111e4567-e89b-12d3-a456-426614174111`),
 `RECON_LOOKBACK_DAYS` (=365), `TESSERACT_CMD`
-(=`C:\Program Files\Tesseract-OCR\tesseract.exe`), `CHUTES_*` (dead).
-`MORPHEUS_MODEL` (matching) defaults to `qwen3-5-9b` in code.
+(=`C:\Program Files\Tesseract-OCR\tesseract.exe`), `MORPHEUS_AGENT_TOOLS` (=`native`).
+- **Removed (2026-06-28 cleanup):** `DEFAULT_SME_ID` (auth always supplies the tenant now),
+  `CHUTES_*` (dead provider), and `USE_AGENT` is no longer needed in `.env`.
+- **`USE_AGENT` now defaults to `true` in code** (agent is the default engine; set
+  `USE_AGENT=false` to force the legacy pipeline). `MORPHEUS_MODEL` (legacy matching)
+  defaults to `qwen3-5-9b`, `MORPHEUS_AGENT_MODEL` to `minimax-m2.5`, both in code.
+  Tuning knobs (`GATE_*`, `VERIFY_*`, `ANOMALY_*`, `LEARNED_*`, `AGENT_*`) all have code defaults.
 
 ## Multi-tenant auth + RLS (LIVE as of 2026-06-28)
 - **Real Supabase Auth (email+password) + RLS on all 12 tables.** Each user owns one
@@ -59,8 +63,12 @@ Upload bank statements (CSV/XLSX), invoices (PDF/image), and payment proofs
   token (no `{sme_id}` path param). Backend still uses service_role (bypasses RLS by design).
 - **DB:** `current_sme_id()` helper + `handle_new_user()` trigger (claims an unclaimed sme by email,
   else inserts). Policies: direct sme_id, FK-chain EXISTS, global read-only for exchange_rate/currency.
-- **WZB demo login:** `finance@wzbgroup.my` / `WzbTreasury#2026` — owns sme `111e4567-…`.
-- `test_files/sme_infos` is the manual "who owns what" dependency ledger; new SMEs now self-onboard.
+- **Demo logins (4 tenants, all password `TreasuryFlow#2026`, email pre-confirmed):**
+  `finance@wzbgroup.my` (WZB, sme `111e4567-…`), `ops@nusantara-logistics.my` (sme `2222…`),
+  `finance@selangortextiles.my` (sme `3333…`), `accounts@pearldelta.sg` (sme `4444…`, SGD base).
+  Provisioned by `seed_demo.py`; re-running rotates the password back to this.
+- `test_files/sme_infos` (JSON) is the manifest/ledger of who owns what + the logins; new SMEs
+  also self-onboard via signup.
 
 ### Post-auth fixes (also 2026-06-28)
 - **AuthContext deadlock (gotcha):** never `await` a supabase call inside `onAuthStateChange` — it
@@ -72,8 +80,8 @@ Upload bank statements (CSV/XLSX), invoices (PDF/image), and payment proofs
   same statement was re-uploaded, silently reassigning one tenant's transactions to another.
 - **Dashboard "Funds reconciled"** now sums `reconciliation_match` (converted_amount for All-accounts
   MYR; transaction_amount per account), not all bank credits.
-- A 2nd tenant **Kaikaruu** (`97a5c162-…`) exists from real app signup; 3 stale cross-tenant matches
-  were cleaned up.
+- (Historical note) earlier ad-hoc tenants (Kaikaruu + junk signups) were removed by the
+  2026-06-28 multi-tenant reseed; the DB now holds exactly the 4 demo tenants above.
 
 ## Frontend routes (AppShell nav = 3 items)
 - `/` — Reconciliation **dashboard**: "Documents" readiness panel + "Go to uploads";
@@ -111,15 +119,29 @@ invoice_id). `exchange_rate` (FX cache). `reconciliation_job`(sme_id) /
 `reconciliation_log`(job_id) / `recommendation`(sme_id, job_id).
 Full column lists in memory `db_state_rls.md`.
 
-## Seed / reset
-- `apps/backend/seed_demo.py` — wipes everything except `sme` + `bank_account`,
-  reseeds a coherent demo (invoices USD/EUR/SGD/MYR, matching transactions,
-  proofs, FX rates). Run: `PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe seed_demo.py`.
-  **It wipes `exchange_rate`**, so after a reset re-run the test-file FX seed
-  (scratchpad `gen_test_files.py`) if you use the test invoices.
-- `test_files/` (9 files) are cross-consistent and reconcilable; the generator is
-  in the session scratchpad (`gen_test_files.py`). The 4 PDFs parse via Morpheus;
-  the 2 PNGs need Tesseract.
+## Seed / reset (multi-tenant, idempotent — 2026-06-28)
+Three modules in `apps/backend/`, all-deterministic ids (uuid5) so re-runs replace in place:
+- **`seed_data.py`** — single source of truth: 4 SMEs, 3 accounts each (mixed
+  MYR/USD/EUR/SGD), a historical reconciled job per tenant (B.1 `manual` exemplars +
+  B.3 outlier baselines), a pre-seeded "current" set (pending invoices + matching/noise
+  transactions + proofs), and a parallel FILE set. Every document tagged `db` vs `file`.
+- **`seed_demo.py`** — the reseed. **Destructive + idempotent:** wipes ALL tenant data
+  (FK-safe order), prunes stray Supabase Auth users, provisions exactly 4 loginable demo
+  users (service-role admin API, email pre-confirmed), inserts accounts/FX/history/current.
+  Run: `PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe seed_demo.py`. Upserts (never wipes)
+  `exchange_rate`.
+- **`seed_files.py`** — (re)generates the "file half" under `test_files/` + `sme_infos` +
+  `README.md`. Run after `seed_demo.py`.
+- Seeds ~132 transactions, 56 invoices, 12 proofs, 20 historical matches across 4 tenants.
+  Edge cases: clean multi-currency auto-match, FX, over-paid→escalate, unmatched, B.2
+  high-value-no-proof + weak-link (downgrade on run), B.3 duplicate-invoice /
+  beneficiary-mismatch / bank-detail-change / amount-outlier, failed invoice & proof parse,
+  statement format coverage (ISO+signed CSV / dd-mm-yyyy CSV / debit-credit XLSX).
+- `test_files/` is now per-tenant: `test_files/<slug>/{bank_statements,invoices,payment_proofs}/`
+  (12 statements + 20 invoices + 20 proofs). NOT pre-seeded — uploading them tests the parse
+  pipeline (PDF→PyMuPDF→Morpheus, PNG→Tesseract→Morpheus). `test_files/sme_infos` (JSON) is the
+  manifest: per-tenant logins, accounts, pre-seeded-vs-file docs, expected reconciliation.
+  (Old scratchpad `gen_test_files.py` retired; old single-tenant 9-file layout replaced.)
 
 ## Major decisions & upgrades (this session)
 1. **Merged** 3 upload pages → `/uploads` with a custom `SegmentedControl`; nav

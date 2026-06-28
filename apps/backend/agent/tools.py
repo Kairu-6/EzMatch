@@ -19,7 +19,7 @@ from datetime import date
 import orchestrator
 from forex_api import get_rate
 from data_contracts import MorpheusMatchProposal, MatchStatus
-from agent import gate
+from agent import gate, verifier, anomaly
 
 
 # ── observe (read-only) ───────────────────────────────────────────
@@ -71,6 +71,32 @@ def get_fx_rate(db, job_id, sme_id, ctx, mem, mode,
     rate_id, rate = get_rate(db, fc, tc, d, job_id)
     ctx.setdefault("rates", {})[(fc, tc, on_date)] = (rate_id, rate)
     return {"from": fc, "to": tc, "date": on_date, "rate": rate, "rate_id": rate_id}
+
+
+# ── verify (read-only self-critique) ──────────────────────────────
+def verify_matches(db, job_id, sme_id, ctx, mem, mode, **_):
+    """Re-examine this run's matches without mutating anything. Surfaces risky
+    auto-commits and possible missed matches so the agent can self-critique."""
+    result = verifier.run_verification(db, job_id, sme_id, ctx, mem, apply=False)
+    findings = [
+        {"invoice_number": f["invoice_number"], "code": f["code"],
+         "severity": f["severity"], "detail": f["detail"],
+         **({"transaction_id": f["transaction_id"]} if f.get("transaction_id") else {})}
+        for f in result["findings"]]
+    risks = sum(1 for f in result["findings"] if f["severity"] == "risk")
+    return {"checked": result["checked"], "risks": risks,
+            "warnings": result["warnings"], "missed": result["missed"],
+            "findings": findings}
+
+
+def scan_anomalies(db, job_id, sme_id, ctx, mem, mode, **_):
+    """Scan the workspace for fraud/anomaly signals (duplicate billing, payments
+    from the wrong party, changed bank details, amount outliers) without mutating
+    anything. Surfaces signals so the agent can flag them in its wrap-up."""
+    result = anomaly.scan_anomalies(db, job_id, sme_id, ctx, mem, apply=False)
+    return {"flagged": result["flagged"], "high": result["high"],
+            "findings": [{"code": f["code"], "severity": f["severity"],
+                          "detail": f["detail"]} for f in result["findings"]]}
 
 
 # ── act (gated + logged) ──────────────────────────────────────────
@@ -200,6 +226,22 @@ TOOLS = [
                                    "rationale": {"type": "string", "description": "why these two match"},
                                    "proof_id": {"type": "string", "description": "optional corroborating proof id"}},
                     "required": ["invoice_id", "transaction_id", "confidence", "rationale"]}},
+    {"name": "verify_matches", "fn": verify_matches,
+     "description": ("Re-check the matches you've made so far this run. Returns risky "
+                     "auto-commits (no proof / weak counterparty link / reused transaction) "
+                     "and possible missed matches (an unmatched invoice with a candidate "
+                     "transaction). Call this in your VERIFY phase before finishing; re-propose "
+                     "a 'missed' candidate if it truly matches. A deterministic verifier will "
+                     "independently downgrade unsupported auto-commits regardless."),
+     "parameters": {"type": "object", "properties": {}, "required": []}},
+    {"name": "scan_anomalies", "fn": scan_anomalies,
+     "description": ("Scan the workspace for fraud/anomaly signals: duplicate (double-billed) "
+                     "invoices, payment proofs naming a different paying party than the invoice "
+                     "counterparty, counterparties whose bank details changed, and invoice amounts "
+                     "far outside a counterparty's norm. Call this in your ADVISE phase and mention "
+                     "anything it returns. A deterministic detector escalates high-severity signals "
+                     "to human review regardless."),
+     "parameters": {"type": "object", "properties": {}, "required": []}},
     {"name": "finish", "fn": _finish_placeholder,
      "description": "Call when every invoice has been matched or deemed unmatchable. Ends the run.",
      "parameters": {"type": "object",

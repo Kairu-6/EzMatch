@@ -9,6 +9,8 @@ import {
   Banknote,
   Receipt,
   ScrollText,
+  ShieldAlert,
+  ShieldCheck,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabaseClient";
@@ -52,6 +54,8 @@ type Account = {
   is_primary: boolean;
 };
 
+type Anomaly = { severity: string; code: string; detail: string };
+
 const myr = (n: number) =>
   new Intl.NumberFormat("en-MY", {
     style: "currency",
@@ -59,25 +63,67 @@ const myr = (n: number) =>
     maximumFractionDigits: 0,
   }).format(n);
 
-// Map a reconciliation_log event_type to an ActivityDrawer line level so the
-// agent's reasoning trace reads with the right emphasis.
-const levelFor = (eventType: string): LogLine["level"] => {
-  const e = (eventType ?? "").toLowerCase();
-  if (e.includes("fail") || e.includes("error")) return "error";
-  if (
-    e.includes("escalat") ||
-    e.includes("reject") ||
-    e.includes("unmatched") ||
-    e.includes("anomaly") ||
-    e.includes("cancel") ||
-    e.includes("exhausted")
-  )
-    return "warning";
-  if (e.includes("commit") || e.includes("completed") || e.includes("finished"))
-    return "success";
-  if (e === "agent_thought") return "muted";
-  return "info";
-};
+// The activity drawer shows a curated, fixed vocabulary of status lines — not the
+// agent's raw reasoning trace (thoughts, tool calls, observations stay in the DB
+// for the audit log). Each whitelisted reconciliation_log event maps to one clean
+// sentence; everything else is dropped.
+function curateLine(r: {
+  event_type?: string;
+  message?: string;
+  metadata?: Record<string, any> | null;
+}): LogLine | null {
+  const e = (r.event_type ?? "").toLowerCase();
+  const m = r.metadata ?? {};
+  const inv = m.invoice_number ? String(m.invoice_number) : "An invoice";
+  switch (e) {
+    case "agent_started":
+      return { text: "Reconciliation engine connected.", level: "info" };
+    case "tool_result": // plan-phase document listings ("Listed N invoices.")
+      return r.message ? { text: r.message, level: "info" } : null;
+    case "match_committed":
+      return { text: `Matched ${inv} to its bank payment.`, level: "success" };
+    case "match_escalated":
+      return {
+        text: `${inv} routed for review — amount variance outside tolerance.`,
+        level: "warning",
+      };
+    case "match_rejected":
+      return { text: `Discarded an implausible match for ${inv}.`, level: "muted" };
+    case "match_downgraded":
+      return {
+        text: `${inv} sent for review — ${m.detail ?? "needs a second look"}.`,
+        level: "warning",
+      };
+    case "anomaly_detected":
+      return { text: `Anomaly — ${m.detail ?? r.message ?? "review needed"}`, level: "warning" };
+    case "verification_complete":
+      return (m.checked ?? 0) > 0
+        ? {
+            text: `Verification complete: ${m.checked} match(es) checked${
+              (m.downgraded ?? 0) > 0 ? `, ${m.downgraded} sent for review` : ""
+            }.`,
+            level: "info",
+          }
+        : null;
+    case "anomaly_scan_done":
+      return {
+        text: `Fraud scan complete: ${m.flagged ?? 0} signal(s) found.`,
+        level: (m.flagged ?? 0) > 0 ? "warning" : "info",
+      };
+    case "invoice_unmatched":
+      return { text: `${inv} left unmatched — no corresponding payment found.`, level: "warning" };
+    case "agent_finished":
+      return { text: r.message ?? "Reconciliation complete.", level: "success" };
+    case "agent_fallback":
+      return { text: "Primary engine unavailable — running the standard pipeline.", level: "warning" };
+    case "job_failed":
+      return { text: "Reconciliation failed. Please try again.", level: "error" };
+    case "job_cancelled":
+      return { text: "Run cancelled.", level: "muted" };
+    default:
+      return null;
+  }
+}
 
 export function DashboardPage() {
   const router = useRouter();
@@ -99,6 +145,7 @@ export function DashboardPage() {
     { accountId: string | null; txAmount: number; converted: number }[]
   >([]);
   const [reconLoading, setReconLoading] = useState(true);
+  const [anomalies, setAnomalies] = useState<Anomaly[]>([]);
 
   const log = (text: string, level: LogLine["level"] = "muted") =>
     setLogs((prev) => [...prev, { text, level }]);
@@ -112,14 +159,39 @@ export function DashboardPage() {
   const renderTrace = useCallback(async (jobId: string) => {
     const { data } = await supabase
       .from("reconciliation_log")
-      .select("event_type, message, created_at")
+      .select("event_type, message, metadata, created_at")
       .eq("job_id", jobId)
       .order("created_at", { ascending: true });
     if (!data || data.length === 0) return;
-    setLogs(
-      data.map((r: any) => ({
-        text: r.message ?? r.event_type,
-        level: levelFor(r.event_type),
+    const lines = data.map(curateLine).filter(Boolean) as LogLine[];
+    if (lines.length) setLogs(lines);
+  }, []);
+
+  // Load fraud/anomaly signals the detector logged for the latest run. Flags live
+  // in reconciliation_log (event_type='anomaly_detected'); scoped to the tenant's
+  // most recent job so the panel reflects this run, not all history.
+  const loadAnomalies = useCallback(async () => {
+    const { data: jobs } = await supabase
+      .from("reconciliation_job")
+      .select("job_id")
+      .order("created_at", { ascending: false })
+      .limit(1);
+    const jobId = jobs?.[0]?.job_id;
+    if (!jobId) {
+      setAnomalies([]);
+      return;
+    }
+    const { data } = await supabase
+      .from("reconciliation_log")
+      .select("message, metadata, created_at")
+      .eq("job_id", jobId)
+      .eq("event_type", "anomaly_detected")
+      .order("created_at", { ascending: true });
+    setAnomalies(
+      (data ?? []).map((r: any) => ({
+        severity: r.metadata?.severity ?? "medium",
+        code: r.metadata?.code ?? "anomaly",
+        detail: r.metadata?.detail ?? r.message ?? "Anomaly detected",
       })),
     );
   }, []);
@@ -270,7 +342,8 @@ export function DashboardPage() {
   useEffect(() => {
     loadStats();
     loadReconciliationState();
-  }, [loadStats, loadReconciliationState]);
+    loadAnomalies();
+  }, [loadStats, loadReconciliationState, loadAnomalies]);
 
   const handleReconcile = async () => {
     setIsRunning(true);
@@ -311,6 +384,7 @@ export function DashboardPage() {
             clearInterval(poll);
             await loadReconciliationState();
             await loadStats();
+            await loadAnomalies();
             setIsRunning(false);
           } else if (job.status === "failed" || job.status === "cancelled") {
             clearInterval(poll);
@@ -428,6 +502,47 @@ export function DashboardPage() {
             {isRunning ? "Running…" : "Run reconciliation"}
           </Button>
         </div>
+      </Panel>
+
+      {/* Anomalies & fraud signals — surfaced by the deterministic detector */}
+      <Panel className="overflow-hidden mb-8">
+        <PanelHeader
+          title="Anomalies & fraud signals"
+          icon={<ShieldAlert className="w-4 h-4" />}
+          action={
+            anomalies.length > 0 ? (
+              <StatusPill
+                tone={
+                  anomalies.some((a) => a.severity === "high")
+                    ? "danger"
+                    : "warning"
+                }
+              >
+                {anomalies.length} flagged
+              </StatusPill>
+            ) : (
+              <StatusPill tone="success">Clear</StatusPill>
+            )
+          }
+        />
+        {anomalies.length === 0 ? (
+          <EmptyState
+            icon={<ShieldCheck className="w-5 h-5" />}
+            title="No anomalies detected this run"
+            description="The detector found no duplicate billing, beneficiary mismatches, bank-detail changes, or amount outliers."
+          />
+        ) : (
+          <ul className="divide-y divide-border">
+            {anomalies.map((a, i) => (
+              <li key={i} className="flex items-start gap-3 px-5 py-3.5">
+                <StatusPill tone={a.severity === "high" ? "danger" : "warning"}>
+                  {a.severity === "high" ? "High" : "Review"}
+                </StatusPill>
+                <p className="text-sm text-ink leading-relaxed">{a.detail}</p>
+              </li>
+            ))}
+          </ul>
+        )}
       </Panel>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
