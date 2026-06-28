@@ -1,6 +1,6 @@
 # TreasuryFlow (NexHack 2026 Submission)
 
-**Target Track:** * **Track 1:** Agentic AI for Internal Enterprise Operations (Finance)
+**Track 1:** Agentic AI for Internal Enterprise Operations (Finance)
 
 TreasuryFlow is a full-stack, agentic financial reconciliation platform built independently. It autonomously ingests, parses, and correlates multi-format financial documents—including invoices, bank statements, and payment proofs—to streamline the internal matching process and resolve operational bottlenecks. 
 
