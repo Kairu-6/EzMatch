@@ -261,17 +261,35 @@ def parse_bank_statement(
     return {"status": "success", "data": transactions, "meta": meta}
 
 
-def upload_parsed_statement(parsed_result: dict[str, Any], statement_id: str, supabase: Any):
+def upload_parsed_statement(
+    parsed_result: dict[str, Any],
+    statement_id: str,
+    supabase: Any,
+    account_id: str | None = None,
+    sme_id: str | None = None,
+):
     if parsed_result.get("status") != "success":
         logger.error("Cannot upload: parsing was not successful.")
         return None
 
-    # --- FIX STEP 1: Get a valid account_id for the hackathon MVP ---
-    account_res = supabase.table("bank_account").select("account_id").limit(1).execute()
-    if not account_res.data:
-        logger.error("No bank accounts found! Cannot link statement.")
-        return None
-    account_id = account_res.data[0]["account_id"]
+    # --- STEP 1: Resolve the target account ---
+    # Use the explicitly chosen account if provided; otherwise fall back to the
+    # tenant's primary/first account (single-tenant MVP).
+    if not account_id:
+        # Fall back to the tenant's primary/first account. sme_id comes from the
+        # verified JWT (server.py); env DEFAULT_SME_ID is a legacy last resort.
+        owner_sme_id = sme_id or os.getenv("DEFAULT_SME_ID")
+        account_query = supabase.table("bank_account").select("account_id")
+        if owner_sme_id:
+            account_query = account_query.eq("sme_id", owner_sme_id)
+        # Prefer the primary account when falling back.
+        account_res = account_query.order("is_primary", desc=True).limit(1).execute()
+        if not account_res.data:
+            account_res = supabase.table("bank_account").select("account_id").limit(1).execute()
+        if not account_res.data:
+            logger.error("No bank accounts found! Cannot link statement.")
+            return None
+        account_id = account_res.data[0]["account_id"]
 
     # --- FIX STEP 2: Create the Parent Statement Record First ---
     meta = parsed_result["meta"]
@@ -293,9 +311,19 @@ def upload_parsed_statement(parsed_result: dict[str, Any], statement_id: str, su
 
     # --- FIX STEP 3: Insert the Transactions ---
     db_ready_rows = []
-    
+
     for raw_row in parsed_result["data"]:
         raw_row["statement_id"] = statement_id
+        # The parser's transaction_id is a content hash (date|desc|amount|n), so
+        # the SAME statement uploaded under two different accounts/tenants would
+        # produce identical ids and collide on the upsert below — silently
+        # reassigning one tenant's transactions to another. Scope the id to the
+        # account. Re-uploading to the SAME account stays idempotent.
+        base_id = raw_row.get("transaction_id")
+        if base_id:
+            raw_row["transaction_id"] = hashlib.sha256(
+                f"{account_id}|{base_id}".encode()
+            ).hexdigest()
         db_ready_rows.append(raw_row)
 
     if not db_ready_rows:

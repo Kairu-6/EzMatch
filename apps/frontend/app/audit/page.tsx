@@ -1,40 +1,243 @@
 "use client";
 
-import React, { useState } from "react";
-import { Info, ArrowRight } from "lucide-react";
+import React, { useState, useEffect, useCallback } from "react";
+import { Info, CheckCircle2 } from "lucide-react";
+import { supabase } from "../lib/supabaseClient";
+import { PageHeader } from "../components/ui/PageHeader";
+import { Panel } from "../components/ui/Panel";
+import { Button } from "../components/ui/Button";
+import { StatusPill } from "../components/ui/StatusPill";
+import { EmptyState } from "../components/ui/EmptyState";
+import { SkeletonRows } from "../components/ui/Skeleton";
+import { Table, TableScroll, Th, Td, Tr } from "../components/ui/Table";
+import { useToast } from "../components/ui/Toast";
 
-const INITIAL_EXCEPTIONS = [
-  { id: "ERR-902", date: "2026-05-22", scope: "EUR Conversion Corridor", amount: "RM -4.52", risk: "Low", description: "Unallocated tracking spread. Invoice calculation expected standard base rate, payment provider added custom margin.", resolved: false },
-  { id: "ERR-894", date: "2026-05-19", scope: "USD Ingest Array", amount: "RM +82.40", risk: "High", description: "Severe balance breach. Ledger values match multiple document items on entry but actual bank slip lists inflated numbers.", resolved: false },
-];
+// One exception = a reconciliation_match the engine left for manual review.
+type Exception = {
+  matchId: string;
+  invoiceNumber: string;
+  counterparty: string;
+  date: string;
+  confidence: number;
+  invoiceAmount: number;
+  invoiceCurrency: string;
+  txAmount: number;
+  txCurrency: string;
+  convertedAmount: number;
+  varianceAmount: number;
+  variancePct: number;
+};
+
+const fmtVariance = (amount: number, currency: string) => {
+  const sign = amount > 0 ? "+" : amount < 0 ? "−" : "";
+  return `${sign}${currency} ${Math.abs(amount).toFixed(2)}`;
+};
+
+// High when the engine was unsure or the amounts diverge materially.
+const isHighRisk = (e: Exception) =>
+  e.confidence < 0.5 || Math.abs(e.variancePct) > 5;
 
 export default function AuditLogPage() {
-  const [exceptions, setExceptions] = useState(INITIAL_EXCEPTIONS);
+  const { toast } = useToast();
+  const [exceptions, setExceptions] = useState<Exception[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [resolving, setResolving] = useState<string | null>(null);
+
+  const fetchExceptions = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from("reconciliation_match")
+      .select(
+        `match_id, match_status, match_confidence,
+         invoice_amount, invoice_currency,
+         transaction_amount, tx_currency,
+         converted_amount, variance_amount, variance_pct, matched_at,
+         invoice ( invoice_number, counterparty_name )`,
+      )
+      .eq("match_status", "pending_review")
+      .order("matched_at", { ascending: false });
+
+    if (error) {
+      toast({
+        tone: "danger",
+        title: "Couldn't load exceptions",
+        description: error.message,
+      });
+      setExceptions([]);
+      setLoading(false);
+      return;
+    }
+
+    setExceptions(
+      (data ?? []).map((m: any) => {
+        const inv = Array.isArray(m.invoice) ? m.invoice[0] : m.invoice;
+        return {
+          matchId: m.match_id,
+          invoiceNumber: inv?.invoice_number ?? "—",
+          counterparty: inv?.counterparty_name ?? "Unknown counterparty",
+          date: m.matched_at ? String(m.matched_at).slice(0, 10) : "—",
+          confidence: m.match_confidence ?? 0,
+          invoiceAmount: m.invoice_amount ?? 0,
+          invoiceCurrency: m.invoice_currency ?? "",
+          txAmount: m.transaction_amount ?? 0,
+          txCurrency: m.tx_currency ?? "",
+          convertedAmount: m.converted_amount ?? 0,
+          varianceAmount: m.variance_amount ?? 0,
+          variancePct: m.variance_pct ?? 0,
+        };
+      }),
+    );
+    setLoading(false);
+  }, [toast]);
+
+  useEffect(() => {
+    fetchExceptions();
+  }, [fetchExceptions]);
+
+  const resolve = async (e: Exception) => {
+    setResolving(e.matchId);
+    const { error } = await supabase
+      .from("reconciliation_match")
+      .update({ match_status: "manual" })
+      .eq("match_id", e.matchId);
+    setResolving(null);
+    setConfirming(null);
+
+    if (error) {
+      toast({
+        tone: "danger",
+        title: "Couldn't resolve",
+        description: error.message,
+      });
+      return;
+    }
+
+    setExceptions((prev) => prev.filter((x) => x.matchId !== e.matchId));
+    toast({
+      tone: "success",
+      title: `${e.invoiceNumber} resolved`,
+      description: "Marked as manually reviewed and cleared from the queue.",
+    });
+  };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 rounded-xl p-4 flex gap-3 text-xs text-amber-800 dark:text-amber-400">
-        <Info className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-        <div><strong>Automated Variance Ledger Exceptions:</strong> This logs mathematical drift occurrences matching threshold breaches.</div>
+    <div className="max-w-5xl mx-auto">
+      <PageHeader
+        title="Audit log"
+        description="Matches the reconciliation engine flagged for manual review. Resolve each once you've confirmed it."
+      />
+
+      <div className="flex items-start gap-3 rounded-md border border-info/30 bg-info-subtle px-4 py-3 mb-6 text-info-fg">
+        <Info className="w-4.5 h-4.5 shrink-0 mt-0.5" />
+        <p className="text-base">
+          These matches scored below the auto-clear confidence threshold, so the
+          engine left them for a human decision. Review the amounts and variance
+          before resolving.
+        </p>
       </div>
 
-      <div className="space-y-4">
-        {exceptions.map((exc) => (
-          <div key={exc.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 space-y-3 shadow-xs">
-            <div className="flex justify-between items-start">
-              <div>
-                <div className="flex items-center gap-2 text-xs font-mono font-bold"><span>{exc.id}</span><span className="text-slate-400">{exc.scope}</span></div>
-                <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 font-sans">{exc.description}</p>
-              </div>
-              <div className="text-right font-mono text-xs font-bold text-rose-500">{exc.amount}</div>
-            </div>
-            <div className="border-t dark:border-slate-800 pt-2 flex justify-between items-center text-[10px] text-slate-400">
-              <span>RISK LAYER: <strong className="text-rose-500">{exc.risk.toUpperCase()}</strong></span>
-              <button onClick={() => setExceptions(p => p.filter(x => x.id !== exc.id))} className="bg-slate-100 dark:bg-slate-800 px-2 py-1 text-slate-700 dark:text-slate-200 rounded-sm hover:bg-emerald-600 hover:text-white flex items-center gap-1 transition">Force Balance <ArrowRight className="w-3 h-3" /></button>
-            </div>
-          </div>
-        ))}
-      </div>
+      <Panel className="overflow-hidden">
+        {loading ? (
+          <TableScroll>
+            <Table>
+              <thead>
+                <Tr>
+                  <Th>Reference</Th>
+                  <Th>Detail</Th>
+                  <Th align="right">Variance</Th>
+                  <Th align="center">Risk</Th>
+                  <Th align="right">Action</Th>
+                </Tr>
+              </thead>
+              <SkeletonRows rows={3} cols={5} />
+            </Table>
+          </TableScroll>
+        ) : exceptions.length === 0 ? (
+          <EmptyState
+            icon={<CheckCircle2 className="w-5 h-5" />}
+            title="All clear"
+            description="No matches are awaiting review. New exceptions will appear here after reconciliation."
+          />
+        ) : (
+          <TableScroll>
+            <Table>
+              <thead>
+                <Tr>
+                  <Th>Reference</Th>
+                  <Th>Detail</Th>
+                  <Th align="right">Variance</Th>
+                  <Th align="center">Risk</Th>
+                  <Th align="right">Action</Th>
+                </Tr>
+              </thead>
+              <tbody>
+                {exceptions.map((e) => (
+                  <Tr key={e.matchId} hover>
+                    <Td>
+                      <div className="font-mono text-sm font-medium text-ink">
+                        {e.invoiceNumber}
+                      </div>
+                      <div className="text-sm text-ink-muted">
+                        {e.counterparty} · {e.date}
+                      </div>
+                    </Td>
+                    <Td className="max-w-md">
+                      <p className="text-base text-ink-muted leading-relaxed">
+                        Confidence {(e.confidence * 100).toFixed(0)}% — below the
+                        auto-clear threshold. Billed {e.invoiceCurrency}{" "}
+                        {e.invoiceAmount.toFixed(2)}, received {e.txCurrency}{" "}
+                        {e.txAmount.toFixed(2)} (≈ {e.convertedAmount.toFixed(2)}{" "}
+                        MYR).
+                      </p>
+                    </Td>
+                    <Td align="right" className="font-medium text-ink tnum">
+                      {fmtVariance(e.varianceAmount, e.txCurrency)}
+                      <div className="text-xs text-ink-subtle font-normal">
+                        {e.variancePct > 0 ? "+" : ""}
+                        {e.variancePct.toFixed(2)}%
+                      </div>
+                    </Td>
+                    <Td align="center">
+                      <StatusPill tone={isHighRisk(e) ? "danger" : "warning"}>
+                        {isHighRisk(e) ? "High" : "Low"}
+                      </StatusPill>
+                    </Td>
+                    <Td align="right">
+                      {confirming === e.matchId ? (
+                        <span className="inline-flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            loading={resolving === e.matchId}
+                            onClick={() => resolve(e)}
+                          >
+                            Confirm
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setConfirming(null)}
+                          >
+                            Cancel
+                          </Button>
+                        </span>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => setConfirming(e.matchId)}
+                        >
+                          Resolve
+                        </Button>
+                      )}
+                    </Td>
+                  </Tr>
+                ))}
+              </tbody>
+            </Table>
+          </TableScroll>
+        )}
+      </Panel>
     </div>
   );
 }

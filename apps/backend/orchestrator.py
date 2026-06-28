@@ -34,6 +34,9 @@ MORPHEUS_API_KEY      = os.getenv("MORPHEUS_API_KEY")
 # ✅ FIX 1: Set default to the working model from your test script
 MORPHEUS_MODEL        = os.getenv("MORPHEUS_MODEL", "qwen3-5-9b")
 CONFIDENCE_THRESHOLD  = float(os.getenv("CONFIDENCE_THRESHOLD", "0.75"))
+# How far back to look for unmatched transactions. The old hardcoded 30 days
+# silently excluded all data once the demo aged; env-driven, generous default.
+LOOKBACK_DAYS         = int(os.getenv("RECON_LOOKBACK_DAYS", "365"))
 
 # Logging helper
 
@@ -70,10 +73,18 @@ def _fetch_invoices(db: Client, sme_id: str) -> list[InvoiceForMatching]:
         .execute()
         .data
     )
-    return [InvoiceForMatching(**r) for r in rows]
+    # Skip rows with incomplete data (e.g. a failed/half-parsed upload) so they
+    # neither crash schema validation nor reach the matcher as garbage.
+    invoices = []
+    for r in rows:
+        try:
+            invoices.append(InvoiceForMatching(**r))
+        except Exception:
+            logger.warning("Skipping invoice %s — incomplete or failed parse.", r.get("invoice_id"))
+    return invoices
 
 
-def _fetch_transactions(db: Client, sme_id: str, days: int = 30) -> list[TransactionForMatching]:
+def _fetch_transactions(db: Client, sme_id: str, days: int = LOOKBACK_DAYS) -> list[TransactionForMatching]:
     cutoff = (datetime.utcnow().date() - timedelta(days=days)).isoformat()
     rows = (
         db.table("bank_transaction")
@@ -175,7 +186,7 @@ Rules:
 INVOICES TO MATCH:
 {''.join(invoice_blocks)}
 
-BANK TRANSACTIONS (last 30 days, unmatched only):
+BANK TRANSACTIONS (last {LOOKBACK_DAYS} days, unmatched only):
 {''.join(txn_blocks)}
 
 Respond with ONLY a valid JSON array. No explanation, no markdown, no preamble.
@@ -259,7 +270,8 @@ def _write_match(
     transaction: TransactionForMatching,
     rate_id: str,
     rate: float,
-):
+    force_status: MatchStatus = None,
+) -> ReconciliationMatchInsert:
     match = ReconciliationMatchInsert.build(
         job_id=job_id,
         proposal=proposal,
@@ -268,6 +280,7 @@ def _write_match(
         rate_id=rate_id,
         rate=rate,
         threshold=CONFIDENCE_THRESHOLD,
+        force_status=force_status,
     )
     db.table("reconciliation_match").insert(match.model_dump()).execute()
     db.table("bank_transaction").update({"is_matched": True}).eq("transaction_id", transaction.transaction_id).execute()
@@ -284,6 +297,7 @@ def _write_match(
              "variance_pct":   match.variance_pct,
              "match_status":   match.match_status,
          })
+    return match
 
 # Step 6 & 7: Complete job + Predictor
 
@@ -339,7 +353,7 @@ def run_reconciliation(sme_id: str) -> dict:
             return {"status": "skipped", "reason": "no_pending_invoices"}
 
         if not transactions:
-            _log(db, job_id, "job_skipped", "No unmatched transactions in the last 30 days.")
+            _log(db, job_id, "job_skipped", f"No unmatched transactions in the last {LOOKBACK_DAYS} days.")
             _complete_job(db, job_id, matched=0, unmatched=len(invoices))
             return {"status": "skipped", "reason": "no_transactions"}
 

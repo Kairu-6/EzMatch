@@ -1,13 +1,17 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Depends
 from fastapi.middleware.cors import CORSMiddleware
 import shutil
 import os
 import uuid
+from dotenv import load_dotenv
 
 # Import your actual parser and supabase connection
 from statement_parser import parse_bank_statement, upload_parsed_statement, supabase
 from proof_parser import process_payment_proof
 from invoice_parser import process_invoice
+from auth import get_current_sme_id
+
+load_dotenv()
 
 app = FastAPI()
 
@@ -21,47 +25,65 @@ app.add_middleware(
 )
 
 @app.post("/api/upload/statement")
-async def process_statement(file: UploadFile = File(...)):
-    print(f"📥 Incoming file from frontend: {file.filename}")
-    
+async def process_statement(
+    file: UploadFile = File(...),
+    account_id: str | None = Form(None),
+    sme_id: str = Depends(get_current_sme_id),
+):
+    print(f"📥 Incoming file from frontend: {file.filename} (account_id={account_id})")
+
     # 1. Securely save the uploaded file temporarily
     temp_filepath = f"temp_{file.filename}"
     try:
         with open(temp_filepath, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-            
-        print("⚙️ Running Parser and AI Engine...")
-        
-        # 2. Feed the file into your existing logic
-        result = parse_bank_statement(file_path=temp_filepath, local_currency="MYR")
-        
+
+        # Parse in the target account's currency (falls back to MYR).
+        local_currency = "MYR"
+        if account_id:
+            acct = (
+                supabase.table("bank_account")
+                .select("currency_code, sme_id")
+                .eq("account_id", account_id)
+                .limit(1)
+                .execute()
+                .data
+            )
+            # The posted account must belong to the authenticated tenant.
+            if not acct or acct[0].get("sme_id") != sme_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Account does not belong to your workspace.",
+                )
+            if acct[0].get("currency_code"):
+                local_currency = acct[0]["currency_code"]
+
+        print(f"⚙️ Running parser (currency={local_currency})...")
+
+        # 2. Feed the file into the existing logic
+        result = parse_bank_statement(file_path=temp_filepath, local_currency=local_currency)
+
         if result["status"] != "success":
             raise HTTPException(status_code=400, detail=result["message"])
-            
-        # 3. Generate a mathematically valid UUID for this specific upload
-        statement_uuid = str(uuid.uuid4())
-        
-        # 4. Create the parent "Statement" folder in Supabase first
-        # BARE MINIMUM: Only sending what we absolutely know it needs
-        try:
-            supabase.table("bank_statement").insert({
-                "statement_id": statement_uuid,           
-                "file_type": "text/csv"         
-            }).execute()
-            print("📁 Parent statement record created successfully.")
-        except Exception as e:
-            print(f"⚠️ Parent creation bypassed/failed: {e}")
 
-        # 5. Push the parsed transactions straight to your Supabase database
+        # 3. Generate a UUID for this upload
+        statement_uuid = str(uuid.uuid4())
+
+        # 4. Push the parsed transactions to Supabase, linked to the chosen
+        #    account (upload_parsed_statement creates the bank_statement row).
         upload_parsed_statement(
             parsed_result=result,
             statement_id=statement_uuid,
-            supabase=supabase
+            supabase=supabase,
+            account_id=account_id,
+            sme_id=sme_id,
         )
-        
+
         print("✅ Success! Database updated.")
         return {"status": "success", "message": "Statement processed and ledger updated."}
-        
+
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"❌ Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -72,7 +94,10 @@ async def process_statement(file: UploadFile = File(...)):
             os.remove(temp_filepath)
 
 @app.post("/api/upload/payment_proof")
-async def upload_payment_proof(file: UploadFile = File(...)):
+async def upload_payment_proof(
+    file: UploadFile = File(...),
+    sme_id: str = Depends(get_current_sme_id),
+):
     print("\n" + "="*50)
     print("🚀 [API START] NEW PAYMENT PROOF UPLOAD")
     print("="*50)
@@ -91,9 +116,10 @@ async def upload_payment_proof(file: UploadFile = File(...)):
         print("\n🟡 [STEP 1] Inserting PENDING row into Supabase 'payment_proof' table...")
         insert_response = supabase.table("payment_proof").insert({
             "proof_id": proof_id,
-            "parse_status": "pending",  
-            "file_type": file_ext,      
-            "file_path": storage_path   
+            "sme_id": sme_id,
+            "parse_status": "pending",
+            "file_type": file_ext,
+            "file_path": storage_path
         }).execute()
         
         print(f"✅ DB Insert Success! Inserted Data: {insert_response.data}")
@@ -139,7 +165,10 @@ async def upload_payment_proof(file: UploadFile = File(...)):
         file.file.close()
 
 @app.post("/api/upload/invoice")
-async def upload_invoice(file: UploadFile = File(...)):
+async def upload_invoice(
+    file: UploadFile = File(...),
+    sme_id: str = Depends(get_current_sme_id),
+):
     print("\n" + "="*50)
     print("🚀 [API START] NEW INVOICE UPLOAD")
     print("="*50)
@@ -158,7 +187,8 @@ async def upload_invoice(file: UploadFile = File(...)):
         print("\n🟡 [STEP 1] Inserting PENDING row into Supabase 'invoice' table...")
         insert_response = supabase.table("invoice").insert({
             "invoice_id": invoice_id,
-            "status": "pending"  
+            "sme_id": sme_id,
+            "status": "pending"
         }).execute()
         
         print(f"✅ DB Insert Success! Inserted Data: {insert_response.data}")

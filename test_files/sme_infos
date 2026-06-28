@@ -1,0 +1,110 @@
+[
+  {
+    "sme_id": "111e4567-e89b-12d3-a456-426614174111",
+    "company_name": "WZB Group Sdn Bhd",
+    "registration_no": "202301012345",
+    "email": "finance@wzbgroup.my",
+    "phone": "+60312345678",
+    "country_code": "MY",
+    "bank_accounts": [
+      {
+        "account_id": "999e4567-e89b-12d3-a456-426614174999",
+        "bank_name": "Maybank",
+        "account_number": "512345678901",
+        "currency_code": "MYR",
+        "account_holder": "WZB Group Sdn Bhd"
+      }
+    ],
+    "documents": {
+      "bank_statements": [
+        {
+          "file": "bank_statements/statement_maybank.csv",
+          "links_to_account_id": "999e4567-e89b-12d3-a456-426614174999",
+          "role": "reconciliation driver (3 matching MYR credits)"
+        },
+        {
+          "file": "bank_statements/statement_signed.csv",
+          "links_to_account_id": "999e4567-e89b-12d3-a456-426614174999",
+          "role": "format coverage (signed amount, dd/mm/yyyy)"
+        },
+        {
+          "file": "bank_statements/statement_cimb.xlsx",
+          "links_to_account_id": "999e4567-e89b-12d3-a456-426614174999",
+          "role": "format coverage (xlsx, withdrawal/deposit)"
+        }
+      ],
+      "invoices": [
+        {
+          "file": "invoices/invoice_nimbus.pdf",
+          "invoice_number": "INV-TEST-001",
+          "counterparty": "Nimbus Technologies",
+          "amount": 3250.0,
+          "currency": "USD"
+        },
+        {
+          "file": "invoices/invoice_hanseatic.pdf",
+          "invoice_number": "INV-TEST-002",
+          "counterparty": "Hanseatic GmbH",
+          "amount": 1840.5,
+          "currency": "EUR"
+        },
+        {
+          "file": "invoices/invoice_crescent.png",
+          "invoice_number": "INV-TEST-003",
+          "counterparty": "Crescent Trading Sdn Bhd",
+          "amount": 7600.0,
+          "currency": "MYR"
+        }
+      ],
+      "payment_proofs": [
+        {
+          "file": "payment_proofs/proof_nimbus.pdf",
+          "corroborates_invoice": "INV-TEST-001",
+          "amount": 3250.0,
+          "currency": "USD",
+          "reference": "SWIFT-USD-9920"
+        },
+        {
+          "file": "payment_proofs/proof_hanseatic.png",
+          "corroborates_invoice": "INV-TEST-002",
+          "amount": 1840.5,
+          "currency": "EUR",
+          "reference": "SEPA-7741"
+        },
+        {
+          "file": "payment_proofs/proof_crescent.pdf",
+          "corroborates_invoice": "INV-TEST-003",
+          "amount": 7600.0,
+          "currency": "MYR",
+          "reference": "TRX-AAA-771"
+        }
+      ]
+    },
+    "dependency_chains": {
+      "bank": "bank_transaction.statement_id -> bank_statement.account_id -> bank_account.sme_id -> sme",
+      "invoice": "invoice.sme_id -> sme",
+      "proof": "payment_proof.sme_id -> sme ; payment_proof.invoice_id -> invoice"
+    },
+    "expected_reconciliation": [
+      {
+        "invoice_number": "INV-TEST-001",
+        "statement_credit_myr": 13812.5,
+        "fx": "USD->MYR @4.25",
+        "proof_reference": "SWIFT-USD-9920"
+      },
+      {
+        "invoice_number": "INV-TEST-002",
+        "statement_credit_myr": 9018.45,
+        "fx": "EUR->MYR @4.90",
+        "proof_reference": "SEPA-7741"
+      },
+      {
+        "invoice_number": "INV-TEST-003",
+        "statement_credit_myr": 7600.0,
+        "fx": "none (MYR)",
+        "proof_reference": "TRX-AAA-771"
+      }
+    ],
+    "notes": "No auth yet: uploads associate to this SME via DEFAULT_SME_ID in the backend. Per-upload UUIDs (statement_id/invoice_id/proof_id/transaction_id) are minted at upload time; files map to records by business key (invoice_number/reference/amount)."
+  }
+]

@@ -1,142 +1,47 @@
 import os
+import fitz  # PyMuPDF
 from supabase import create_client, Client
 from dotenv import load_dotenv
-import base64
-import json
-from openai import OpenAI
-from pydantic import ValidationError
-import fitz
-import uuid
 
-load_dotenv()
-
-# 1. Import strictly from your existing data_contracts.py
 from data_contracts import (
     ParseStatus,
     ChutesParserInput,
     ChutesParserOutput,
-    ParsedProofData
+    ParsedProofData,
 )
+from parser_llm import ocr_image, structure
+
+load_dotenv()
 
 # ══════════════════════════════════════════════════════════════════
-# 2. SUPABASE & CHUTES SETUP
+# SUPABASE
 # ══════════════════════════════════════════════════════════════════
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_API_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-CHUTES_API_KEY = os.environ.get("CHUTES_API_KEY")
-CHUTES_URL = os.environ.get("CHUTES_URL")
-chutes_client = OpenAI(
-    base_url=CHUTES_URL, 
-    api_key=CHUTES_API_KEY
-)
+PROOF_INSTRUCTION = """Extract these fields from the payment receipt text below and return ONLY a valid JSON object (no markdown, no commentary):
+1. parsed_amount: the total amount paid as a pure float (strip commas and currency symbols).
+2. parsed_currency: 3-letter ISO currency code (e.g. MYR, USD, EUR).
+3. parsed_date: the payment date in ISO-8601 (YYYY-MM-DD).
+4. parsed_reference: the transaction ID, reference, or receipt number.
+5. sender_name: who sent the payment, or null.
+6. bank_name: the issuing bank, or null.
+If a field is absent, return null.
+
+Example: {"parsed_amount":1250.0,"parsed_currency":"MYR","parsed_date":"2026-10-25","parsed_reference":"TRX-998877","sender_name":"John Doe","bank_name":"Maybank"}"""
+
 
 # ══════════════════════════════════════════════════════════════════
-# 3A. IMAGE PARSER (CHUTES VISION)
+# IMAGE PARSER (Tesseract OCR -> Morpheus)
 # ══════════════════════════════════════════════════════════════════
-def extract_data_with_chutes(input_data: ChutesParserInput) -> ChutesParserOutput:
-    print(f"--> [Chutes Vision] Analyzing file: {input_data.file_path}")
-    
+def extract_proof_image(input_data: ChutesParserInput) -> ChutesParserOutput:
+    print(f"--> [OCR] Reading proof image: {input_data.file_path}")
     try:
-        # 1. Download file from Supabase
         file_bytes = supabase.storage.from_("proofs").download(input_data.file_path)
-        base64_image = base64.b64encode(file_bytes).decode('utf-8')
-        mime_type = "image/jpeg" if input_data.file_type in ["jpg", "jpeg"] else f"image/{input_data.file_type}"
-
-        # 2. Strict JSON Schema Prompt
-        image_instruction = """
-        You are a highly precise financial OCR API. Your primary function is to extract data from payment proofs and receipts.
-        Your ONLY output must be a valid JSON object. Do not wrap the output in markdown backticks (e.g., ```json) and do not include any conversational text.
-
-        ### FORMAT INSTRUCTIONS & RULES:
-        1. parsed_amount: Strip all commas, currency symbols (RM, $, etc.), and text. Return a pure float (e.g., 1500.50).
-        2. parsed_currency: Extract or infer the 3-letter ISO currency code (e.g., MYR, USD, SGD). 
-        3. parsed_date: Convert ANY date format found on the receipt (e.g., '26 May 2026', '05/26/26') strictly to standard ISO-8601 format: YYYY-MM-DD.
-        4. parsed_reference: Extract the primary transaction ID, reference number, or receipt number.
-        5. Missing Data: If a specific field is not present on the receipt, return null for that field.
-
-        ### CONFIDENCE GUARDRAILS:
-        If the image is completely illegible, completely blank, or clearly NOT a financial document (e.g., a photo of a landscape), you must return null for all fields and set all confidence_scores to 0.0.
-
-        ### FEW-SHOT EXAMPLE:
-        If you see a receipt with: "Transfer to Acme Corp on 25-Oct-2026. Total: RM 1,250.00. Ref: TRX-998877. From: John Doe via Maybank."
-        You will output exactly:
-        {
-          "parsed_amount": 1250.0,
-          "parsed_currency": "MYR",
-          "parsed_date": "2026-10-25",
-          "parsed_reference": "TRX-998877",
-          "sender_name": "John Doe",
-          "bank_name": "Maybank",
-          "confidence_scores": {
-            "amount": 0.99,
-            "date": 0.95
-          }
-        }
-        """
-
-        # 3. Call Chutes API
-        response = chutes_client.chat.completions.create(
-            model="Qwen/Qwen3.6-27B-TEE", 
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a precise financial OCR API. Return ONLY valid JSON." 
-                },
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text", 
-                            "text": """
-                            Analyze the attached payment proof.
-                            Your ONLY output must be a valid JSON object matching this schema. Do not use markdown backticks (```json).
-
-                            ### FORMAT INSTRUCTIONS:
-                            1. parsed_amount: Strip commas and currency symbols. Return a pure float.
-                            2. parsed_currency: 3-letter ISO currency code.
-                            3. parsed_date: Convert to standard ISO-8601 format: YYYY-MM-DD.
-                            4. parsed_reference: Extract the transaction ID or receipt number.
-                            5. Missing Data: Return null if not found.
-
-                            ### CONFIDENCE GUARDRAILS:
-                            If the image is completely illegible or not a financial document, return null for all fields and set confidence_scores to 0.0.
-
-                            ### JSON SCHEMA / FEW-SHOT EXAMPLE:
-                            {
-                              "parsed_amount": 1250.0,
-                              "parsed_currency": "MYR",
-                              "parsed_date": "2026-10-25",
-                              "parsed_reference": "TRX-998877",
-                              "sender_name": "John Doe",
-                              "bank_name": "Maybank",
-                              "confidence_scores": {"amount": 0.99, "date": 0.95}
-                            }
-                            """
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:{mime_type};base64,{base64_image}"}
-                        }
-                    ]
-                }
-            ],
-            temperature=0.0 
-        )
-        
-        # 4. Parse the output
-        raw_output = response.choices[0].message.content.strip()
-        
-        # Strip hallucinated markdown if present
-        if raw_output.startswith("```json"):
-            raw_output = raw_output[7:-3].strip()
-        elif raw_output.startswith("```"):
-            raw_output = raw_output[3:-3].strip()
-            
-        parsed_dict = json.loads(raw_output)
+        text = ocr_image(file_bytes)
+        parsed_dict = structure(text, PROOF_INSTRUCTION)
         validated_data = ParsedProofData(**parsed_dict)
-        
         return ChutesParserOutput(
             proof_id=input_data.proof_id,
             status=ParseStatus.COMPLETED,
@@ -145,98 +50,33 @@ def extract_data_with_chutes(input_data: ChutesParserInput) -> ChutesParserOutpu
             parsed_date=parsed_dict.get("parsed_date"),
             parsed_reference=parsed_dict.get("parsed_reference"),
             parsed_data=validated_data,
-            message=None
-        )
-
-    except json.JSONDecodeError:
-        return ChutesParserOutput(
-            proof_id=input_data.proof_id,
-            status=ParseStatus.FAILED,
-            message="Chutes AI failed to return valid JSON."
+            message=None,
         )
     except Exception as e:
         return ChutesParserOutput(
             proof_id=input_data.proof_id,
             status=ParseStatus.FAILED,
-            message=f"Chutes API Error: {str(e)}"
+            message=f"Image OCR/parse error: {str(e)}",
         )
 
+
 # ══════════════════════════════════════════════════════════════════
-# 3B. PDF PARSER & LLM LOGIC (TEXT-ONLY)
+# PDF PARSER (PyMuPDF text -> Morpheus)
 # ══════════════════════════════════════════════════════════════════
-def extract_data_from_pdf(input_data: ChutesParserInput) -> ChutesParserOutput:
-    print(f"--> [PDF Parser] Extracting text from: {input_data.file_path}")
-    
+def extract_proof_pdf(input_data: ChutesParserInput) -> ChutesParserOutput:
+    print(f"--> [PDF] Extracting proof text: {input_data.file_path}")
     try:
-        # 1. Download file from Supabase
         file_bytes = supabase.storage.from_("proofs").download(input_data.file_path)
         if not file_bytes:
             raise ValueError("Downloaded PDF file is empty.")
 
-        # 2. Extract Raw Text using PyMuPDF
         doc = fitz.open(stream=file_bytes, filetype="pdf")
-        extracted_text = ""
-        for page in doc:
-            extracted_text += page.get_text()
-            
-        # Failsafe: If the PDF is just a scanned image with no text layer
+        extracted_text = "".join(page.get_text() for page in doc)
         if not extracted_text.strip():
-            raise ValueError("No readable text found in PDF. It may be a scanned image.")
-            
-        print(f"--> [PDF Parser] Successfully extracted {len(extracted_text)} characters.")
+            raise ValueError("No readable text found in PDF (it may be a scanned image).")
 
-        # 3. Call Chutes API (Text-Only Mode)
-        response = chutes_client.chat.completions.create(
-            model="Qwen/Qwen3.6-27B-TEE", 
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a precise financial parsing API. Return ONLY valid JSON."
-                },
-                {
-                    "role": "user",
-                    "content": f"""
-                    Analyze the following raw text extracted from a payment receipt PDF.
-                    Your ONLY output must be a valid JSON object matching the schema below. Do not use markdown backticks (```json).
-
-                    ### FORMAT INSTRUCTIONS:
-                    1. parsed_amount: Strip commas and currency symbols. Return a pure float.
-                    2. parsed_currency: 3-letter ISO currency code.
-                    3. parsed_date: Convert to standard ISO-8601 format: YYYY-MM-DD.
-                    4. parsed_reference: Extract the transaction ID or receipt number.
-                    5. Missing Data: Return null if not found.
-
-                    ### JSON SCHEMA / FEW-SHOT EXAMPLE:
-                    {{
-                      "parsed_amount": 1250.0,
-                      "parsed_currency": "MYR",
-                      "parsed_date": "2026-10-25",
-                      "parsed_reference": "TRX-998877",
-                      "sender_name": "John Doe",
-                      "bank_name": "Maybank",
-                      "confidence_scores": {{"amount": 0.99, "date": 0.95}}
-                    }}
-
-                    ### RAW PDF TEXT:
-                    {extracted_text}
-                    """
-                }
-            ],
-            temperature=0.0 
-        )
-        
-        # 4. Parse Output & Strip Markdown
-        raw_output = response.choices[0].message.content.strip()
-        if raw_output.startswith("```json"):
-            raw_output = raw_output[7:-3].strip()
-        elif raw_output.startswith("```"):
-            raw_output = raw_output[3:-3].strip()
-            
-        parsed_dict = json.loads(raw_output)
-        
-        # 5. Pydantic Validation Safety Net
+        parsed_dict = structure(extracted_text, PROOF_INSTRUCTION)
         validated_data = ParsedProofData(**parsed_dict)
-        
         return ChutesParserOutput(
             proof_id=input_data.proof_id,
             status=ParseStatus.COMPLETED,
@@ -245,65 +85,46 @@ def extract_data_from_pdf(input_data: ChutesParserInput) -> ChutesParserOutput:
             parsed_date=parsed_dict.get("parsed_date"),
             parsed_reference=parsed_dict.get("parsed_reference"),
             parsed_data=validated_data,
-            message=None
-        )
-
-    except json.JSONDecodeError:
-        return ChutesParserOutput(
-            proof_id=input_data.proof_id,
-            status=ParseStatus.FAILED,
-            message="Model Hallucination: Chutes AI failed to return valid JSON."
-        )
-    except ValidationError as val_err:
-        error_details = "; ".join([f"{e['loc'][0]}: {e['msg']}" for e in val_err.errors()])
-        return ChutesParserOutput(
-            proof_id=input_data.proof_id,
-            status=ParseStatus.FAILED,
-            message=f"Data Validation Error: {error_details}"
+            message=None,
         )
     except Exception as e:
         return ChutesParserOutput(
             proof_id=input_data.proof_id,
             status=ParseStatus.FAILED,
-            message=f"PDF Parsing Error: {str(e)}"
+            message=f"PDF parse error: {str(e)}",
         )
 
+
 # ══════════════════════════════════════════════════════════════════
-# 4. MAIN ORCHESTRATOR FUNCTION
+# ORCHESTRATOR
 # ══════════════════════════════════════════════════════════════════
 def process_payment_proof(proof_id: str, file_path: str, file_type: str):
-    """
-    Handles the lifecycle of an uploaded payment proof.
-    """
-    print(f"\nStarting processing for proof_id: {proof_id}")
+    """Handle the lifecycle of an uploaded payment proof."""
+    print(f"\n--- PROOF ORCHESTRATOR START (id={proof_id}) ---")
 
     parser_input = ChutesParserInput(
-        proof_id=proof_id,
-        file_path=file_path,
-        file_type=file_type
+        proof_id=proof_id, file_path=file_path, file_type=file_type
     )
 
     try:
         if parser_input.file_type == "pdf":
-            output: ChutesParserOutput = extract_data_from_pdf(parser_input)
+            output = extract_proof_pdf(parser_input)
         elif parser_input.file_type in ["jpg", "jpeg", "png"]:
-            output: ChutesParserOutput = extract_data_with_chutes(parser_input)
+            output = extract_proof_image(parser_input)
         else:
             raise ValueError(f"Unsupported file type: {parser_input.file_type}")
     except Exception as e:
         output = ChutesParserOutput(
             proof_id=proof_id,
             status=ParseStatus.FAILED,
-            message=f"Parser API exception: {str(e)}"
+            message=f"Parser exception: {str(e)}",
         )
 
-    # 🔥 DEBUG CATCH: Reveal any hidden errors
     if output.status == ParseStatus.FAILED:
-        print(f"🚨 [CRITICAL AI ERROR]: {output.message}")
+        print(f"[PARSE ERROR]: {output.message}")
     else:
-        print(f"✅ [AI Extraction Status]: {output.status.upper()}")
+        print(f"[AI Extraction Status]: {output.status.upper()}")
 
-    # Build the update payload mapping exactly to the Supabase columns
     update_payload = {
         "parse_status": output.status.value,
         "parsed_amount": output.parsed_amount,
@@ -311,13 +132,10 @@ def process_payment_proof(proof_id: str, file_path: str, file_type: str):
         "parsed_date": output.parsed_date,
         "parsed_reference": output.parsed_reference,
         "error_message": output.message,
-        "parsed_data": output.parsed_data.model_dump(exclude_none=True) if output.parsed_data else None
+        "parsed_data": output.parsed_data.model_dump(exclude_none=True) if output.parsed_data else None,
     }
-
-    # Clean payload of None values to avoid overwriting DB defaults with nulls
     update_payload = {k: v for k, v in update_payload.items() if v is not None}
 
-    # Push updates to Supabase
     try:
         response = (
             supabase.table("payment_proof")
@@ -325,49 +143,21 @@ def process_payment_proof(proof_id: str, file_path: str, file_type: str):
             .eq("proof_id", output.proof_id)
             .execute()
         )
-        print(f"Successfully updated Supabase for proof_id: {proof_id}\n")
+        print(f"Supabase update OK for proof_id: {proof_id}")
+        print("--- PROOF ORCHESTRATOR END ---\n")
         return response.data
-    
     except Exception as db_error:
-        print(f"❌ Failed to update database for {proof_id}. Error: {db_error}\n")
+        print(f"[DB ERROR] Failed to update proof {proof_id}: {db_error}")
+        print("--- PROOF ORCHESTRATOR END ---\n")
         return None
-    
+
 
 if __name__ == "__main__":
     import uuid
-
-    # 1. Generate a dummy UUID for the test
     test_proof_id = str(uuid.uuid4())
-    
-    # ⚠️ IMPORTANT: For this local test to work, you MUST manually upload 
-    # a file named "test_proof.jpg" (or .pdf) into your Supabase 'proofs' bucket first!
-    test_file_path = "test-receipt.png"  # Change to .pdf if you are testing a PDF
-    test_file_type = "png"             # Change to "pdf" if you are testing a PDF
-    
-    # 2. Insert the dummy row FIRST so the AI has something to update
-    print(f"\n🟡 [SETUP] Inserting dummy row into DB for proof_id: {test_proof_id}")
-    supabase.table("payment_proof").insert({
-        "proof_id": test_proof_id,
-        "parse_status": "pending",
-        "file_type": test_file_type,
-        "file_path": test_file_path
-    }).execute()
-    
-    print("\n" + "="*50)
-    print(f"🧪 INITIATING LOCAL PAYMENT PROOF TEST")
-    print("="*50)
-
-    # 3. Fire the orchestrator
-    result = process_payment_proof(
-        proof_id=test_proof_id,
-        file_path=test_file_path,
-        file_type=test_file_type
-    )
-    
-    print("\n[DB Result]:", result)
-    
-    # 4. Final outcome
-    if result:
-        print("\n🎉 Test Complete! Check your Supabase database for the updated row.")
-    else:
-        print("\n❌ Test Failed. Check the logs above for errors.")
+    print(f"[SETUP] Inserting dummy row for proof_id: {test_proof_id}")
+    supabase.table("payment_proof").insert(
+        {"proof_id": test_proof_id, "parse_status": "pending", "file_type": "pdf", "file_path": "test_proof.pdf"}
+    ).execute()
+    result = process_payment_proof(proof_id=test_proof_id, file_path="test_proof.pdf", file_type="pdf")
+    print("[DB Result]:", result)

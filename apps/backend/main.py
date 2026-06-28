@@ -10,9 +10,21 @@ Run with:
 """
 
 import os
-from fastapi import BackgroundTasks, HTTPException
+import sys
+from fastapi import BackgroundTasks, Depends, HTTPException
 from supabase import create_client
 from dotenv import load_dotenv
+
+from auth import get_current_sme_id
+
+# The codebase prints emoji to stdout for debug logging. On a non-UTF-8 Windows
+# console (cp1252) those prints raise UnicodeEncodeError mid-request and fail the
+# job. Force UTF-8 stdout/stderr so logging never breaks the pipeline.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 
 # Import the existing tested app — all /api/upload routes stay intact
 from server import app
@@ -21,45 +33,50 @@ from orchestrator import run_reconciliation
 
 load_dotenv()
 
+# Agentic reconciliation toggle. When true, /api/reconcile runs the tool-using
+# agent loop (agent/runner.py); when false it runs the legacy linear pipeline.
+# Same DB contract either way, so /api/job-status + the dashboard are unchanged.
+USE_AGENT = os.getenv("USE_AGENT", "false").lower() == "true"
+
+if USE_AGENT:
+    from agent.runner import run_agent
+    _reconcile_task = run_agent
+else:
+    _reconcile_task = run_reconciliation
+
 supabase = create_client(
     os.getenv("SUPABASE_URL"),
     os.getenv("SUPABASE_API_KEY"),
 )
 
 
-@app.post("/api/reconcile/{sme_id}")
-async def reconcile(sme_id: str, background_tasks: BackgroundTasks):
+@app.post("/api/reconcile")
+async def reconcile(
+    background_tasks: BackgroundTasks,
+    sme_id: str = Depends(get_current_sme_id),
+):
     """
-    Trigger reconciliation for an SME after their statement has been uploaded.
+    Trigger reconciliation for the authenticated tenant.
 
-    Frontend calls this immediately after /api/upload succeeds.
+    Frontend calls this immediately after /api/upload succeeds. sme_id is
+    derived from the caller's JWT — never trusted from the URL.
     Returns 202 Accepted straight away — matching runs in the background.
-    Poll /api/job-status/{sme_id} to check when it's done.
+    Poll /api/job-status to check when it's done.
     """
-    # Confirm the sme_id actually exists before queuing the job
-    sme = (
-        supabase.table("sme")
-        .select("sme_id")
-        .eq("sme_id", sme_id)
-        .single()
-        .execute()
-    )
-    if not sme.data:
-        raise HTTPException(status_code=404, detail=f"SME {sme_id} not found.")
-
-    background_tasks.add_task(run_reconciliation, sme_id)
+    background_tasks.add_task(_reconcile_task, sme_id)
 
     return {
         "status":  "accepted",
         "sme_id":  sme_id,
+        "mode":    "agent" if USE_AGENT else "legacy",
         "message": "Reconciliation started. Poll /api/job-status for updates.",
     }
 
 
-@app.get("/api/job-status/{sme_id}")
-async def job_status(sme_id: str):
+@app.get("/api/job-status")
+async def job_status(sme_id: str = Depends(get_current_sme_id)):
     """
-    Returns the most recent reconciliation job for this SME.
+    Returns the most recent reconciliation job for the authenticated tenant.
     Frontend polls this after calling /api/reconcile.
 
     Possible status values: pending | processing | completed | failed

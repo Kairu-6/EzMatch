@@ -415,11 +415,25 @@ class ReconciliationMatchInsert(BaseModel):
         rate:        float,
         rate_id: Optional[str] = None,
         threshold:   float = 0.75,
+        force_status: Optional["MatchStatus"] = None,
     ) -> "ReconciliationMatchInsert":
+        """
+        Build the row written to reconciliation_match.
+
+        By default match_status is derived from confidence vs. threshold (legacy
+        orchestrator behaviour). The agentic path passes `force_status` so its
+        deterministic gate — which also weighs variance and value caps — owns the
+        commit decision instead of confidence alone.
+        """
         txn_amount    = transaction.credit_amount or 0.0
         converted     = round(invoice.invoice_amount * rate, 4)
         variance      = round(txn_amount - converted, 4)
         variance_pct  = round((variance / converted) * 100, 4) if converted else 0.0
+
+        status = force_status if force_status is not None else (
+            MatchStatus.AUTO if proposal.confidence >= threshold
+            else MatchStatus.PENDING_REVIEW
+        )
 
         return cls(
             job_id             = job_id,
@@ -435,8 +449,7 @@ class ReconciliationMatchInsert(BaseModel):
             converted_amount   = converted,
             variance_amount    = variance,
             variance_pct       = variance_pct,
-            match_status       = MatchStatus.AUTO if proposal.confidence >= threshold
-                                 else MatchStatus.PENDING_REVIEW,
+            match_status       = status,
         )
 
 
