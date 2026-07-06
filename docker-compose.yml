@@ -1,0 +1,26 @@
+# One-box deploy: backend (FastAPI+Tesseract) + frontend (Next standalone).
+# Supabase / Morpheus are external cloud — nothing else to host.
+#
+# Backend secrets: apps/backend/.env  (create on the server, gitignored).
+# Frontend build args: root .env       (the three NEXT_PUBLIC_* below).
+# The browser calls the backend directly, so NEXT_PUBLIC_API_URL must be the
+# box's PUBLIC address (http://<EC2_PUBLIC_IP>:8000), not "backend".
+services:
+  backend:
+    build: ./apps/backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./apps/backend/.env
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./apps/frontend
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
