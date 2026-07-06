@@ -15,6 +15,8 @@ import { useToast } from "../components/ui/Toast";
 // One exception = a reconciliation_match the engine left for manual review.
 type Exception = {
   matchId: string;
+  invoiceId: string;
+  transactionId: string;
   invoiceNumber: string;
   counterparty: string;
   date: string;
@@ -41,15 +43,15 @@ export default function AuditLogPage() {
   const { toast } = useToast();
   const [exceptions, setExceptions] = useState<Exception[]>([]);
   const [loading, setLoading] = useState(true);
-  const [confirming, setConfirming] = useState<string | null>(null);
-  const [resolving, setResolving] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<{ id: string; action: "resolve" | "reject" } | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
 
   const fetchExceptions = useCallback(async () => {
     setLoading(true);
     const { data, error } = await supabase
       .from("reconciliation_match")
       .select(
-        `match_id, match_status, match_confidence,
+        `match_id, invoice_id, transaction_id, match_status, match_confidence,
          invoice_amount, invoice_currency,
          transaction_amount, tx_currency,
          converted_amount, variance_amount, variance_pct, matched_at,
@@ -74,6 +76,8 @@ export default function AuditLogPage() {
         const inv = Array.isArray(m.invoice) ? m.invoice[0] : m.invoice;
         return {
           matchId: m.match_id,
+          invoiceId: m.invoice_id ?? "",
+          transactionId: m.transaction_id ?? "",
           invoiceNumber: inv?.invoice_number ?? "—",
           counterparty: inv?.counterparty_name ?? "Unknown counterparty",
           date: m.matched_at ? String(m.matched_at).slice(0, 10) : "—",
@@ -95,30 +99,52 @@ export default function AuditLogPage() {
     fetchExceptions();
   }, [fetchExceptions]);
 
-  const resolve = async (e: Exception) => {
-    setResolving(e.matchId);
+  // Resolve = accept the match (mark manually reviewed). Reject = the human
+  // disagrees: mark the match rejected and unlink it so the invoice and the
+  // bank transaction go back into the pool and can be matched again.
+  const apply = async (e: Exception, action: "resolve" | "reject") => {
+    setBusy(e.matchId);
+    const status = action === "resolve" ? "manual" : "rejected";
     const { error } = await supabase
       .from("reconciliation_match")
-      .update({ match_status: "manual" })
+      .update({ match_status: status })
       .eq("match_id", e.matchId);
-    setResolving(null);
+
+    // Best-effort unlink on reject; the match is already rejected either way, so
+    // a failed unlink shouldn't block clearing the queue — surface it, no rollback.
+    if (!error && action === "reject") {
+      if (e.invoiceId)
+        await supabase.from("invoice").update({ status: "unmatched" }).eq("invoice_id", e.invoiceId);
+      if (e.transactionId)
+        await supabase.from("bank_transaction").update({ is_matched: false }).eq("transaction_id", e.transactionId);
+    }
+
+    setBusy(null);
     setConfirming(null);
 
     if (error) {
       toast({
         tone: "danger",
-        title: "Couldn't resolve",
+        title: action === "resolve" ? "Couldn't resolve" : "Couldn't reject",
         description: error.message,
       });
       return;
     }
 
     setExceptions((prev) => prev.filter((x) => x.matchId !== e.matchId));
-    toast({
-      tone: "success",
-      title: `${e.invoiceNumber} resolved`,
-      description: "Marked as manually reviewed and cleared from the queue.",
-    });
+    toast(
+      action === "resolve"
+        ? {
+            tone: "success",
+            title: `${e.invoiceNumber} resolved`,
+            description: "Marked as manually reviewed and cleared from the queue.",
+          }
+        : {
+            tone: "success",
+            title: `${e.invoiceNumber} rejected`,
+            description: "Match removed — the invoice and transaction are unmatched and eligible again.",
+          },
+    );
   };
 
   return (
@@ -132,8 +158,9 @@ export default function AuditLogPage() {
         <Info className="w-4.5 h-4.5 shrink-0 mt-0.5" />
         <p className="text-base">
           These matches scored below the auto-clear confidence threshold, so the
-          engine left them for a human decision. Review the amounts and variance
-          before resolving.
+          engine left them for a human decision. Review the amounts and variance,
+          then <strong>Resolve</strong> to accept the match or <strong>Reject</strong>{" "}
+          to unlink it — rejecting frees the invoice and transaction to be matched again.
         </p>
       </div>
 
@@ -204,14 +231,16 @@ export default function AuditLogPage() {
                       </StatusPill>
                     </Td>
                     <Td align="right">
-                      {confirming === e.matchId ? (
+                      {confirming?.id === e.matchId ? (
                         <span className="inline-flex items-center gap-2">
                           <Button
                             size="sm"
-                            loading={resolving === e.matchId}
-                            onClick={() => resolve(e)}
+                            loading={busy === e.matchId}
+                            onClick={() => apply(e, confirming.action)}
                           >
-                            Confirm
+                            {confirming.action === "resolve"
+                              ? "Confirm match"
+                              : "Remove match"}
                           </Button>
                           <Button
                             size="sm"
@@ -222,13 +251,22 @@ export default function AuditLogPage() {
                           </Button>
                         </span>
                       ) : (
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => setConfirming(e.matchId)}
-                        >
-                          Resolve
-                        </Button>
+                        <span className="inline-flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => setConfirming({ id: e.matchId, action: "resolve" })}
+                          >
+                            Resolve
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setConfirming({ id: e.matchId, action: "reject" })}
+                          >
+                            Reject
+                          </Button>
+                        </span>
                       )}
                     </Td>
                   </Tr>
