@@ -11,12 +11,14 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { SkeletonRows } from "../components/ui/Skeleton";
 import { Table, TableScroll, Th, Td, Tr } from "../components/ui/Table";
 import { useToast } from "../components/ui/Toast";
+import { rejectMatch } from "../lib/matchActions";
 
 // One exception = a reconciliation_match the engine left for manual review.
 type Exception = {
   matchId: string;
   invoiceId: string;
   transactionId: string;
+  jobId: string;
   invoiceNumber: string;
   counterparty: string;
   date: string;
@@ -51,7 +53,7 @@ export default function AuditLogPage() {
     const { data, error } = await supabase
       .from("reconciliation_match")
       .select(
-        `match_id, invoice_id, transaction_id, match_status, match_confidence,
+        `match_id, invoice_id, transaction_id, job_id, match_status, match_confidence,
          invoice_amount, invoice_currency,
          transaction_amount, tx_currency,
          converted_amount, variance_amount, variance_pct, matched_at,
@@ -78,6 +80,7 @@ export default function AuditLogPage() {
           matchId: m.match_id,
           invoiceId: m.invoice_id ?? "",
           transactionId: m.transaction_id ?? "",
+          jobId: m.job_id ?? "",
           invoiceNumber: inv?.invoice_number ?? "—",
           counterparty: inv?.counterparty_name ?? "Unknown counterparty",
           date: m.matched_at ? String(m.matched_at).slice(0, 10) : "—",
@@ -100,23 +103,19 @@ export default function AuditLogPage() {
   }, [fetchExceptions]);
 
   // Resolve = accept the match (mark manually reviewed). Reject = the human
-  // disagrees: mark the match rejected and unlink it so the invoice and the
-  // bank transaction go back into the pool and can be matched again.
+  // disagrees: mark it rejected, unlink invoice + transaction, and teach the engine
+  // to avoid the pairing (shared rejectMatch helper).
   const apply = async (e: Exception, action: "resolve" | "reject") => {
     setBusy(e.matchId);
-    const status = action === "resolve" ? "manual" : "rejected";
-    const { error } = await supabase
-      .from("reconciliation_match")
-      .update({ match_status: status })
-      .eq("match_id", e.matchId);
-
-    // Best-effort unlink on reject; the match is already rejected either way, so
-    // a failed unlink shouldn't block clearing the queue — surface it, no rollback.
-    if (!error && action === "reject") {
-      if (e.invoiceId)
-        await supabase.from("invoice").update({ status: "unmatched" }).eq("invoice_id", e.invoiceId);
-      if (e.transactionId)
-        await supabase.from("bank_transaction").update({ is_matched: false }).eq("transaction_id", e.transactionId);
+    let error: string | null;
+    if (action === "resolve") {
+      const res = await supabase
+        .from("reconciliation_match")
+        .update({ match_status: "manual" })
+        .eq("match_id", e.matchId);
+      error = res.error?.message ?? null;
+    } else {
+      ({ error } = await rejectMatch(e));
     }
 
     setBusy(null);
@@ -126,7 +125,7 @@ export default function AuditLogPage() {
       toast({
         tone: "danger",
         title: action === "resolve" ? "Couldn't resolve" : "Couldn't reject",
-        description: error.message,
+        description: error,
       });
       return;
     }

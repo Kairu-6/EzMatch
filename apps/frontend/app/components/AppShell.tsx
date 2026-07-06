@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard,
   History,
+  Clock,
   ReceiptText,
   FileSpreadsheet,
   ShieldCheck,
@@ -32,6 +33,7 @@ type MenuLink = { href: string; label: string; icon: React.ElementType };
 const HOME_ITEMS: MenuLink[] = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/audit", label: "Audit log", icon: History },
+  { href: "/history", label: "History", icon: Clock },
 ];
 
 const UPLOAD_ITEMS: MenuLink[] = [
@@ -146,7 +148,8 @@ function TopNav() {
     setMobileOpen(false);
   }, [pathname]);
 
-  const homeActive = pathname === "/" || pathname === "/audit";
+  const homeActive =
+    pathname === "/" || pathname === "/audit" || pathname === "/history";
   const uploadActive = pathname === "/uploads";
 
   const handleSignOut = async () => {

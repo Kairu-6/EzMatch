@@ -290,6 +290,9 @@ export function DashboardPage() {
            invoice ( invoice_number, counterparty_name ),
            bank_transaction ( bank_statement ( account_id ) )`,
         )
+        // Only accepted matches count toward reconciled totals — exclude
+        // pending_review and rejected so revoking a match updates the numbers.
+        .in("match_status", ["auto", "manual"])
         .order("matched_at", { ascending: false }),
       supabase
         .from("invoice")
