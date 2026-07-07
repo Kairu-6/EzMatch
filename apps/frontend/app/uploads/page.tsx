@@ -10,6 +10,8 @@ import {
   Landmark,
   Plus,
   Trash2,
+  RefreshCw,
+  BadgeCheck,
 } from "lucide-react";
 import { PageHeader } from "../components/ui/PageHeader";
 import { Panel, PanelHeader } from "../components/ui/Panel";
@@ -451,6 +453,36 @@ function UploadsInner() {
     }
   };
 
+  const [syncing, setSyncing] = useState(false);
+
+  const syncMyInvois = async () => {
+    setSyncing(true);
+    try {
+      const res = await fetch(`${API}/api/myinvois/sync`, {
+        method: "POST",
+        headers: authHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.detail || "");
+      toast({
+        tone: "success",
+        title: `${data.imported ?? 0} e-Invoice${data.imported === 1 ? "" : "s"} synced`,
+        description: data.imported
+          ? "Added to pending invoices for reconciliation."
+          : "No new validated e-Invoices found.",
+      });
+      fetchPending();
+    } catch (e) {
+      toast({
+        tone: "danger",
+        title: "Sync failed",
+        description: (e as Error)?.message || "Couldn't reach MyInvois. Check Settings.",
+      });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const uploadInvoice = async (files: FileList) => {
     const file = files[0];
     if (!file) return;
@@ -798,7 +830,21 @@ function UploadsInner() {
       {/* ── Invoices ── */}
       {tab === "invoices" && (
         <div role="tabpanel" id="seg-panel-invoices" aria-labelledby="seg-tab-invoices">
-          <div className="mb-6">
+          <div className="mb-6 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm text-ink-muted">
+                Pull validated e-Invoices from LHDN MyInvois — or upload a file below.
+              </p>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={syncMyInvois}
+                loading={syncing}
+                icon={<RefreshCw className="w-4 h-4" />}
+              >
+                Sync from MyInvois
+              </Button>
+            </div>
             <Dropzone
               accept=".pdf,.jpg,.jpeg,.png"
               onFiles={uploadInvoice}
@@ -811,7 +857,7 @@ function UploadsInner() {
 
           <Panel className="overflow-hidden">
             <PanelHeader
-              title="Pending receivables"
+              title="Pending invoices"
               icon={<ReceiptText className="w-4 h-4" />}
               action={
                 <span className="text-sm text-ink-muted tnum">
@@ -855,9 +901,18 @@ function UploadsInner() {
                               failed ? "text-ink-muted" : "text-accent-text font-medium"
                             }
                           >
-                            <span title={failed ? inv.error_message : undefined}>
-                              {inv.invoice_number ||
-                                (failed ? "Parse failed" : "Processing…")}
+                            <span className="inline-flex items-center gap-2">
+                              <span title={failed ? inv.error_message : undefined}>
+                                {inv.invoice_number ||
+                                  (failed ? "Parse failed" : "Processing…")}
+                              </span>
+                              {inv.myinvois_uuid && (
+                                <span title="Validated e-Invoice from LHDN MyInvois">
+                                  <StatusPill tone="info" icon={BadgeCheck}>
+                                    e-Invoice
+                                  </StatusPill>
+                                </span>
+                              )}
                             </span>
                           </Td>
                           <Td>

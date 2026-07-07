@@ -37,8 +37,40 @@ Upload bank statements (CSV/XLSX), invoices (PDF/image), and payment proofs
 - **Tesseract OCR** (local binary) — image invoices/proofs are OCR'd to text, then
   Morpheus structures them. `TESSERACT_CMD` in `.env` points at the binary.
 - **Frankfurter** — historical FX rates, cache-first via the `exchange_rate` table.
+- **LHDN MyInvois** (`myinvois.hasil.gov.my` / `preprod.…` sandbox) — pull VALIDATED
+  e-Invoices as a second invoice source (augments OCR, doesn't replace it). See the
+  MyInvois section below.
 - **Chutes** — FORMER OCR/vision provider, now UNUSED (account hit $0 balance);
   env vars kept but dead. Do not reintroduce without funding.
+
+## LHDN MyInvois e-Invoice integration (2026-07-07)
+Pull validated e-Invoices from MyInvois so they land in `invoice` and flow through
+reconciliation like OCR'd invoices — **MyInvois is just another invoice source**.
+- **Client:** `apps/backend/myinvois_client.py` — OAuth2 `client_credentials`
+  (`/connect/token`, scope `InvoicingAPI`, in-proc token cache), `get_recent_documents`
+  (Sent/Received, last 31 days, Valid only), `get_document_raw` (raw UBL 2.1 JSON —
+  the recent/details endpoints report **MYR only, no currency**, so we read
+  `DocumentCurrencyCode` + `PayableAmount` from the raw doc), and `map_document`
+  (UBL→invoice row). **Mock mode** (environment=`mock`) returns 5 static UBL fixtures
+  so it's demoable with no real creds; flip environment to `preprod`/`production` to hit
+  the real API (no code change). Self-check: `test_myinvois_map.py`.
+- **Endpoint:** `POST /api/myinvois/sync` (server.py, JWT→sme_id) pulls both directions,
+  dedups on `myinvois_uuid`, upserts invoices `on_conflict="sme_id,myinvois_uuid"`.
+- **Auth model:** taxpayer (per-tenant client_id/secret). Intermediary path is stubbed
+  behind `creds.model=='intermediary'` (adds `onbehalfof` header), not exercised.
+- **The IRB UUID is NOT a recon join key** (bank txns carry no UUID) — it's an ingestion
+  dedup/idempotency key + trust badge. Matcher stays LLM-semantic, unchanged.
+- **DB (migration `add_myinvois`):** `invoice` gained `myinvois_uuid`, `direction`,
+  `source` (default `upload`) + a unique index on `(sme_id, myinvois_uuid)` (not
+  partial — PostgREST upsert can't infer a partial index; NULL uuids stay unconstrained).
+  New `myinvois_credential` table (PK `sme_id`, RLS via `current_sme_id()`).
+  `# ponytail: client_secret stored plaintext under RLS — prototype-grade, same trust
+  level as bank_account data; not production.`
+- **Frontend:** `/settings` page (creds form, env Mock/Sandbox/Production, read/write
+  `myinvois_credential` via anon client) linked from the AppShell profile menu;
+  "Sync from MyInvois" button + `e-Invoice` badge on the Uploads → Invoices tab.
+- **Follow-ups (not built):** submission/Peppol (MDEC accreditation); matcher
+  direction-awareness (Received/payables invoices go into a sign-agnostic matcher today).
 
 ## Backend `.env` keys
 `SUPABASE_URL`, `SUPABASE_API_KEY` (service_role), `MORPHEUS_URL`,

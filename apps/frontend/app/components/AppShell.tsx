@@ -13,6 +13,7 @@ import {
   LogOut,
   RefreshCw,
   Landmark,
+  Settings,
   ChevronDown,
   CircleUser,
   Menu,
@@ -238,6 +239,15 @@ function TopNav() {
                   </p>
                   <p className="text-xs text-ink-subtle">SME workspace</p>
                 </div>
+                <Link
+                  role="menuitem"
+                  href="/settings"
+                  onClick={() => setOpenId(null)}
+                  className="flex w-full items-center gap-2.5 px-3 h-9 rounded-md text-base text-ink-muted hover:bg-surface-2 hover:text-ink transition-colors outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                >
+                  <Settings className="w-4 h-4 text-ink-subtle shrink-0" />
+                  MyInvois settings
+                </Link>
                 <button
                   role="menuitem"
                   onClick={handleChangeAccount}

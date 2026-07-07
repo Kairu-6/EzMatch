@@ -12,6 +12,7 @@ from statement_parser import parse_bank_statement, upload_parsed_statement, supa
 from proof_parser import process_payment_proof
 from invoice_parser import process_invoice
 from auth import get_current_sme_id
+import myinvois_client
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -158,3 +159,60 @@ async def upload_invoice(
         raise HTTPException(status_code=500, detail=f"Upload workflow failed: {str(e)}")
     finally:
         file.file.close()
+
+
+@app.post("/api/myinvois/sync")
+async def myinvois_sync(sme_id: str = Depends(get_current_sme_id)):
+    """Pull VALIDATED e-Invoices (both directions) from MyInvois into the invoice
+    table. Idempotent on (sme_id, myinvois_uuid). See myinvois_client."""
+    creds = (
+        supabase.table("myinvois_credential")
+        .select("*").eq("sme_id", sme_id).limit(1).execute().data
+    )
+    if not creds:
+        raise HTTPException(status_code=400, detail="MyInvois is not configured. Add credentials in Settings.")
+    creds = creds[0]
+
+    imported, skipped = 0, 0
+    by_direction = {"Sent": 0, "Received": 0}
+    try:
+        for direction in ("Sent", "Received"):
+            docs = myinvois_client.get_recent_documents(creds, direction)
+            uuids = [d["uuid"] for d in docs if d.get("uuid")]
+            if not uuids:
+                continue
+            # Dedup against already-synced invoices for this tenant.
+            existing = (
+                supabase.table("invoice")
+                .select("myinvois_uuid").eq("sme_id", sme_id)
+                .in_("myinvois_uuid", uuids).execute().data
+            )
+            seen = {r["myinvois_uuid"] for r in existing}
+            rows = []
+            for uuid_ in uuids:
+                if uuid_ in seen:
+                    skipped += 1
+                    continue
+                ubl = myinvois_client.get_document_raw(creds, uuid_)
+                row = myinvois_client.map_document(ubl, direction, sme_id, uuid_)
+                # Skip half-mapped docs — they'd be dropped by recon anyway.
+                if not all(row.get(k) for k in
+                           ("invoice_number", "counterparty_name", "invoice_currency",
+                            "invoice_amount", "invoice_date")):
+                    skipped += 1
+                    continue
+                rows.append(row)
+            if rows:
+                supabase.table("invoice").upsert(
+                    rows, on_conflict="sme_id,myinvois_uuid"
+                ).execute()
+                imported += len(rows)
+                by_direction[direction] += len(rows)
+
+        logger.info("MyInvois sync for %s: imported=%d skipped=%d", sme_id, imported, skipped)
+        return {"status": "success", "imported": imported, "skipped": skipped, "by_direction": by_direction}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("MyInvois sync failed.")
+        raise HTTPException(status_code=500, detail=f"MyInvois sync failed: {str(e)}")
