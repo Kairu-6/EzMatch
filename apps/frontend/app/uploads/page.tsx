@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, Suspense } from "react";
+import React, { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   FileSpreadsheet,
@@ -12,7 +12,10 @@ import {
   Trash2,
   RefreshCw,
   BadgeCheck,
+  Plug,
+  ChevronDown,
 } from "lucide-react";
+import Link from "next/link";
 import { PageHeader } from "../components/ui/PageHeader";
 import { Panel, PanelHeader } from "../components/ui/Panel";
 import { Dropzone, type UploadStatus } from "../components/ui/Dropzone";
@@ -26,6 +29,13 @@ import { Field } from "../components/ui/Field";
 import { useToast } from "../components/ui/Toast";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../lib/AuthContext";
+import { cn } from "../components/ui/cn";
+
+const IMPORT_SOURCES = [
+  { key: "myinvois", label: "LHDN MyInvois" },
+  { key: "sql", label: "SQL Account" },
+  { key: "autocount", label: "AutoCount" },
+] as const;
 
 // Backend base URL. Set NEXT_PUBLIC_API_URL (e.g. to a tunnelled https URL)
 // when the app isn't served from the same machine as the backend.
@@ -453,30 +463,72 @@ function UploadsInner() {
     }
   };
 
+  // ── Connected apps: which invoice connectors are configured + usable ──────
+  const [connectors, setConnectors] = useState({
+    myinvois: false,
+    autocount: false,
+    sql: false,
+  });
   const [syncing, setSyncing] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const importRef = useRef<HTMLDivElement>(null);
 
-  const syncMyInvois = async () => {
+  const fetchConnectors = useCallback(async () => {
+    // RLS scopes both reads to the logged-in tenant. A connector is "available"
+    // only if its saved config will actually run (mock, or the needed secret set).
+    const [mi, acct] = await Promise.all([
+      supabase.from("myinvois_credential").select("*").maybeSingle(),
+      supabase.from("accounting_credential").select("*"),
+    ]);
+    const m = mi.data;
+    const rows: any[] = acct.data ?? [];
+    const ac = rows.find((r) => r.provider === "autocount");
+    const sq = rows.find((r) => r.provider === "sql");
+    setConnectors({
+      myinvois: !!m && (m.environment === "mock" || (!!m.client_id && !!m.client_secret)),
+      // AutoCount + SQL are mock-only (their real API docs need a paid SME subscription).
+      autocount: !!ac && ac.environment === "mock",
+      sql: !!sq && sq.environment === "mock",
+    });
+  }, []);
+
+  useEffect(() => {
+    fetchConnectors();
+  }, [fetchConnectors]);
+
+  useEffect(() => {
+    if (!importOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (importRef.current && !importRef.current.contains(e.target as Node)) setImportOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [importOpen]);
+
+  const runImport = async (key: "myinvois" | "autocount" | "sql") => {
+    setImportOpen(false);
     setSyncing(true);
     try {
-      const res = await fetch(`${API}/api/myinvois/sync`, {
-        method: "POST",
-        headers: authHeaders(),
-      });
+      const url =
+        key === "myinvois"
+          ? `${API}/api/myinvois/sync`
+          : `${API}/api/accounting/sync?provider=${key}`;
+      const res = await fetch(url, { method: "POST", headers: authHeaders() });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.detail || "");
       toast({
         tone: "success",
-        title: `${data.imported ?? 0} e-Invoice${data.imported === 1 ? "" : "s"} synced`,
+        title: `${data.imported ?? 0} invoice${data.imported === 1 ? "" : "s"} synced`,
         description: data.imported
           ? "Added to pending invoices for reconciliation."
-          : "No new validated e-Invoices found.",
+          : "No new invoices found.",
       });
       fetchPending();
     } catch (e) {
       toast({
         tone: "danger",
-        title: "Sync failed",
-        description: (e as Error)?.message || "Couldn't reach MyInvois. Check Settings.",
+        title: "Import failed",
+        description: (e as Error)?.message || "Couldn't reach the connector. Check Settings.",
       });
     } finally {
       setSyncing(false);
@@ -833,17 +885,59 @@ function UploadsInner() {
           <div className="mb-6 space-y-3">
             <div className="flex items-center justify-between gap-3">
               <p className="text-sm text-ink-muted">
-                Pull validated e-Invoices from LHDN MyInvois — or upload a file below.
+                Import invoices from a connected app — or upload a file below.
               </p>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={syncMyInvois}
-                loading={syncing}
-                icon={<RefreshCw className="w-4 h-4" />}
-              >
-                Sync from MyInvois
-              </Button>
+              <div className="relative" ref={importRef}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setImportOpen((v) => !v)}
+                  loading={syncing}
+                  icon={<Plug className="w-4 h-4" />}
+                  aria-haspopup="menu"
+                  aria-expanded={importOpen}
+                >
+                  Import from connected apps
+                  <ChevronDown className={cn("w-3.5 h-3.5 transition-transform", importOpen && "rotate-180")} />
+                </Button>
+                {importOpen && (
+                  <div
+                    role="menu"
+                    className="absolute right-0 top-full mt-1.5 min-w-[240px] rounded-lg border border-border bg-surface shadow-md p-1 z-30"
+                  >
+                    {IMPORT_SOURCES.map(({ key, label }) => {
+                      const available = connectors[key];
+                      return (
+                        <button
+                          key={key}
+                          role="menuitem"
+                          disabled={!available}
+                          onClick={() => runImport(key)}
+                          className={cn(
+                            "flex w-full items-center justify-between gap-3 px-3 h-9 rounded-md text-sm transition-colors outline-none",
+                            available
+                              ? "text-ink hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent cursor-pointer"
+                              : "text-ink-subtle cursor-not-allowed",
+                          )}
+                        >
+                          <span className="flex items-center gap-2">
+                            <Plug className="w-4 h-4 shrink-0" />
+                            {label}
+                          </span>
+                          {!available && <span className="text-xs">Not configured</span>}
+                        </button>
+                      );
+                    })}
+                    <Link
+                      href="/settings"
+                      onClick={() => setImportOpen(false)}
+                      className="flex items-center gap-2 px-3 h-9 mt-1 border-t border-border rounded-md text-sm text-ink-muted hover:bg-surface-2 hover:text-ink transition-colors"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" /> Manage connectors in Settings
+                    </Link>
+                  </div>
+                )}
+              </div>
             </div>
             <Dropzone
               accept=".pdf,.jpg,.jpeg,.png"
@@ -910,6 +1004,13 @@ function UploadsInner() {
                                 <span title="Validated e-Invoice from LHDN MyInvois">
                                   <StatusPill tone="info" icon={BadgeCheck}>
                                     e-Invoice
+                                  </StatusPill>
+                                </span>
+                              )}
+                              {(inv.source === "autocount" || inv.source === "sql") && (
+                                <span title={`Imported from ${inv.source === "autocount" ? "AutoCount" : "SQL Account"}`}>
+                                  <StatusPill tone="info" icon={Plug}>
+                                    {inv.source === "autocount" ? "AutoCount" : "SQL Account"}
                                   </StatusPill>
                                 </span>
                               )}

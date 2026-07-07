@@ -13,6 +13,7 @@ from proof_parser import process_payment_proof
 from invoice_parser import process_invoice
 from auth import get_current_sme_id
 import myinvois_client
+import accounting_client
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -216,3 +217,61 @@ async def myinvois_sync(sme_id: str = Depends(get_current_sme_id)):
     except Exception as e:
         logger.exception("MyInvois sync failed.")
         raise HTTPException(status_code=500, detail=f"MyInvois sync failed: {str(e)}")
+
+
+@app.post("/api/accounting/sync")
+async def accounting_sync(
+    provider: str,
+    sme_id: str = Depends(get_current_sme_id),
+):
+    """Pull sales invoices from an accounting system (provider=autocount|sql) into the
+    invoice table. Idempotent on (sme_id, source, source_ref). See accounting_client."""
+    if provider not in ("autocount", "sql"):
+        raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
+    creds = (
+        supabase.table("accounting_credential")
+        .select("*").eq("sme_id", sme_id).eq("provider", provider).limit(1).execute().data
+    )
+    if not creds:
+        raise HTTPException(status_code=400, detail=f"{provider} is not configured. Add credentials in Settings.")
+    creds = creds[0]
+
+    try:
+        docs = accounting_client.get_recent_invoices(creds)
+        rows = []
+        for doc in docs:
+            row = accounting_client.map_invoice(doc, sme_id, provider)
+            # Skip half-mapped docs — recon would drop them anyway.
+            if not all(row.get(k) for k in
+                       ("invoice_number", "counterparty_name", "invoice_currency",
+                        "invoice_amount", "invoice_date")):
+                continue
+            rows.append(row)
+
+        # Dedup against already-synced invoices for this tenant+source.
+        refs = [r["source_ref"] for r in rows]
+        skipped = 0
+        if refs:
+            existing = (
+                supabase.table("invoice")
+                .select("source_ref").eq("sme_id", sme_id).eq("source", provider)
+                .in_("source_ref", refs).execute().data
+            )
+            seen = {r["source_ref"] for r in existing}
+            skipped = sum(1 for r in rows if r["source_ref"] in seen)
+            rows = [r for r in rows if r["source_ref"] not in seen]
+
+        if rows:
+            supabase.table("invoice").upsert(
+                rows, on_conflict="sme_id,source,source_ref"
+            ).execute()
+
+        logger.info("Accounting sync (%s) for %s: imported=%d skipped=%d", provider, sme_id, len(rows), skipped)
+        return {"status": "success", "imported": len(rows), "skipped": skipped, "provider": provider}
+    except NotImplementedError as e:
+        raise HTTPException(status_code=501, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Accounting sync failed.")
+        raise HTTPException(status_code=500, detail=f"Accounting sync failed: {str(e)}")

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
+import { BadgeCheck, Plug } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../lib/AuthContext";
 import { PageHeader } from "../components/ui/PageHeader";
@@ -12,21 +13,30 @@ import { SegmentedControl } from "../components/ui/SegmentedControl";
 import { SkeletonRows } from "../components/ui/Skeleton";
 import { useToast } from "../components/ui/Toast";
 
-type Env = "mock" | "preprod" | "production";
+/** Shared "connected / not configured" header pill. */
+function StatusChip({ configured, isReal }: { configured: boolean; isReal: boolean }) {
+  if (!configured) return <StatusPill tone="neutral">Not configured</StatusPill>;
+  return (
+    <StatusPill tone={isReal ? "success" : "info"}>
+      {isReal ? "Connected" : "Connected — mock"}
+    </StatusPill>
+  );
+}
 
-const ENV_ITEMS = [
+/* ── LHDN MyInvois (own table + OAuth-style creds) ───────────────────────────── */
+const MYINVOIS_ENVS = [
   { value: "mock", label: "Mock" },
   { value: "preprod", label: "Sandbox" },
   { value: "production", label: "Production" },
 ];
 
-export default function SettingsPage() {
+function MyInvoisCard() {
   const { smeId } = useAuth();
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [configured, setConfigured] = useState(false);
-  const [environment, setEnvironment] = useState<Env>("mock");
+  const [environment, setEnvironment] = useState("mock");
   const [tin, setTin] = useState("");
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
@@ -41,14 +51,13 @@ export default function SettingsPage() {
       .maybeSingle();
     if (data) {
       setConfigured(true);
-      setEnvironment((data.environment as Env) ?? "mock");
+      setEnvironment(data.environment ?? "mock");
       setTin(data.tin ?? "");
       setClientId(data.client_id ?? "");
       setClientSecret(data.client_secret ?? "");
     }
     setLoading(false);
   }, [smeId]);
-
   useEffect(() => {
     load();
   }, [load]);
@@ -75,90 +84,160 @@ export default function SettingsPage() {
       { onConflict: "sme_id" },
     );
     setSaving(false);
-    if (error) {
-      toast({ title: "Couldn't save", description: error.message, tone: "danger" });
-      return;
-    }
+    if (error) return toast({ title: "Couldn't save", description: error.message, tone: "danger" });
     setConfigured(true);
     toast({ title: "MyInvois settings saved", tone: "success" });
   };
 
   return (
-    <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8">
-      <PageHeader
-        title="MyInvois integration"
-        description="Pull validated e-Invoices from LHDN MyInvois straight into reconciliation — no PDF uploads, no parse failures."
-        action={
-          configured ? (
-            <StatusPill tone={isReal ? "success" : "info"}>
-              {isReal ? "Connected" : "Connected — sandbox mock"}
-            </StatusPill>
-          ) : (
-            <StatusPill tone="neutral">Not configured</StatusPill>
-          )
-        }
+    <Panel>
+      <PanelHeader
+        title="LHDN MyInvois"
+        icon={<BadgeCheck className="w-4 h-4" />}
+        action={<StatusChip configured={configured} isReal={isReal} />}
       />
+      <div className="p-4 space-y-5">
+        {loading ? (
+          <SkeletonRows rows={3} cols={1} />
+        ) : (
+          <>
+            <p className="text-sm text-ink-muted">
+              Pull validated e-Invoices from LHDN MyInvois straight into reconciliation.
+            </p>
+            <div className="rounded-md border border-border bg-surface-2 p-3 text-sm text-ink-muted">
+              <span className="font-medium text-ink">Built against LHDN's public API docs.</span>{" "}
+              The live path is developed but unverified — we don't have real credentials yet
+              (MyTax ERP registration is currently unavailable), so run it in Mock for now.
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <span className="text-sm font-medium text-ink">Environment</span>
+              <SegmentedControl
+                aria-label="MyInvois environment"
+                items={MYINVOIS_ENVS}
+                value={environment}
+                onChange={setEnvironment}
+              />
+              <p className="text-sm text-ink-muted">
+                {isReal
+                  ? "Register TreasuryFlow as an ERP in your MyInvois portal (Taxpayer Profile → Register ERP) to get these."
+                  : "Mock uses sample e-Invoices so you can try the flow without real credentials."}
+              </p>
+            </div>
+            {isReal && (
+              <>
+                <Field label="Tax Identification Number (TIN)" value={tin} onChange={(e) => setTin(e.target.value)} placeholder="C1234567890" />
+                <Field label="Client ID" value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder="from MyInvois Register ERP" />
+                <Field label="Client Secret" type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} placeholder="••••••••" />
+              </>
+            )}
+            <div className="flex justify-end pt-1">
+              <Button onClick={save} loading={saving}>Save</Button>
+            </div>
+          </>
+        )}
+      </div>
+    </Panel>
+  );
+}
 
-      <Panel>
-        <PanelHeader title="Taxpayer credentials" />
-        <div className="p-4 space-y-5">
-          {loading ? (
-            <SkeletonRows rows={3} cols={1} />
-          ) : (
-            <>
-              <div className="flex flex-col gap-1.5">
-                <span className="text-sm font-medium text-ink">Environment</span>
-                <SegmentedControl
-                  aria-label="MyInvois environment"
-                  items={ENV_ITEMS}
-                  value={environment}
-                  onChange={(v) => setEnvironment(v as Env)}
-                />
-                <p className="text-sm text-ink-muted">
-                  {isReal
-                    ? "Register TreasuryFlow as an ERP in your MyInvois portal (Taxpayer Profile → Register ERP) to get these."
-                    : "Mock uses sample e-Invoices so you can try the flow without real credentials."}
-                </p>
-              </div>
+/* ── AutoCount / SQL Account (mock-only) ─────────────────────────────────────────
+   Both are mock-only: their real API documentation is behind a paid SME subscription
+   (SQL Account is also on-premise), so we deliberately don't ship a guessed API path.
+   Enabling saves an environment='mock' row so the connector lights up in the importer. */
+function AccountingCard({
+  provider,
+  title,
+  description,
+  limitation,
+}: {
+  provider: "autocount" | "sql";
+  title: string;
+  description: string;
+  limitation: string;
+}) {
+  const { smeId } = useAuth();
+  const { toast } = useToast();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [configured, setConfigured] = useState(false);
 
-              {isReal && (
-                <>
-                  <Field
-                    label="Tax Identification Number (TIN)"
-                    value={tin}
-                    onChange={(e) => setTin(e.target.value)}
-                    placeholder="C1234567890"
-                  />
-                  <Field
-                    label="Client ID"
-                    value={clientId}
-                    onChange={(e) => setClientId(e.target.value)}
-                    placeholder="from MyInvois Register ERP"
-                  />
-                  <Field
-                    label="Client Secret"
-                    type="password"
-                    value={clientSecret}
-                    onChange={(e) => setClientSecret(e.target.value)}
-                    placeholder="••••••••"
-                  />
-                </>
-              )}
+  const load = useCallback(async () => {
+    if (!smeId) return;
+    setLoading(true);
+    const { data } = await supabase
+      .from("accounting_credential")
+      .select("provider")
+      .eq("sme_id", smeId)
+      .eq("provider", provider)
+      .maybeSingle();
+    setConfigured(!!data);
+    setLoading(false);
+  }, [smeId, provider]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
-              <div className="flex justify-end pt-1">
-                <Button onClick={save} loading={saving}>
-                  Save
-                </Button>
-              </div>
-            </>
-          )}
-        </div>
-      </Panel>
+  const save = async () => {
+    if (!smeId) return;
+    setSaving(true);
+    const { error } = await supabase.from("accounting_credential").upsert(
+      { sme_id: smeId, provider, environment: "mock", updated_at: new Date().toISOString() },
+      { onConflict: "sme_id,provider" },
+    );
+    setSaving(false);
+    if (error) return toast({ title: "Couldn't save", description: error.message, tone: "danger" });
+    setConfigured(true);
+    toast({ title: `${title} mock import enabled`, tone: "success" });
+  };
 
-      <p className="text-sm text-ink-subtle mt-4">
-        After saving, go to <span className="text-ink-muted">Uploads → Invoices</span> and click{" "}
-        <span className="text-ink-muted">Sync from MyInvois</span>.
-      </p>
+  return (
+    <Panel>
+      <PanelHeader
+        title={title}
+        icon={<Plug className="w-4 h-4" />}
+        action={<StatusChip configured={configured} isReal={false} />}
+      />
+      <div className="p-4 space-y-4">
+        {loading ? (
+          <SkeletonRows rows={2} cols={1} />
+        ) : (
+          <>
+            <p className="text-sm text-ink-muted">{description}</p>
+            <div className="rounded-md border border-border bg-surface-2 p-3 text-sm text-ink-muted">
+              <span className="font-medium text-ink">Mock only.</span> {limitation}
+            </div>
+            <div className="flex justify-end">
+              <Button onClick={save} loading={saving} variant={configured ? "secondary" : "primary"}>
+                {configured ? "Mock enabled" : "Enable mock import"}
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+export default function SettingsPage() {
+  return (
+    <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 space-y-6">
+      <PageHeader
+        title="Integrations"
+        description="Connect the systems your invoices already live in. Configured connectors light up under “Import from connected apps” on the Invoices tab."
+      />
+      <MyInvoisCard />
+      <AccountingCard
+        provider="autocount"
+        title="AutoCount"
+        description="Pull sales invoices from AutoCount — one of Malaysia's most-used SME accounting systems."
+        limitation="AutoCount's real API documentation requires a paid SME subscription we don't have, so we can't integrate the live API. This connector imports sample invoices to demonstrate the reconciliation flow."
+      />
+      <AccountingCard
+        provider="sql"
+        title="SQL Account"
+        description="Pull sales invoices from SQL Account, another leading Malaysian SME accounting system."
+        limitation="SQL Account's API is on-premise and its documentation requires a paid SME subscription, so we can't integrate the live API. This connector imports sample invoices to demonstrate the reconciliation flow."
+      />
     </div>
   );
 }
