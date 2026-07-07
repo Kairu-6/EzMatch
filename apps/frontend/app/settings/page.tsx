@@ -18,7 +18,7 @@ function StatusChip({ configured, isReal }: { configured: boolean; isReal: boole
   if (!configured) return <StatusPill tone="neutral">Not configured</StatusPill>;
   return (
     <StatusPill tone={isReal ? "success" : "info"}>
-      {isReal ? "Connected" : "Connected — mock"}
+      {isReal ? "Connected" : "Mock"}
     </StatusPill>
   );
 }
@@ -86,7 +86,7 @@ function MyInvoisCard() {
     setSaving(false);
     if (error) return toast({ title: "Couldn't save", description: error.message, tone: "danger" });
     setConfigured(true);
-    toast({ title: "MyInvois settings saved", tone: "success" });
+    toast({ title: "Settings saved", tone: "success" });
   };
 
   return (
@@ -104,11 +104,6 @@ function MyInvoisCard() {
             <p className="text-sm text-ink-muted">
               Pull validated e-Invoices from LHDN MyInvois straight into reconciliation.
             </p>
-            <div className="rounded-md border border-border bg-surface-2 p-3 text-sm text-ink-muted">
-              <span className="font-medium text-ink">Built against LHDN's public API docs.</span>{" "}
-              The live path is developed but unverified — we don't have real credentials yet
-              (MyTax ERP registration is currently unavailable), so run it in Mock for now.
-            </div>
             <div className="flex flex-col gap-1.5">
               <span className="text-sm font-medium text-ink">Environment</span>
               <SegmentedControl
@@ -148,12 +143,10 @@ function AccountingCard({
   provider,
   title,
   description,
-  limitation,
 }: {
   provider: "autocount" | "sql";
   title: string;
   description: string;
-  limitation: string;
 }) {
   const { smeId } = useAuth();
   const { toast } = useToast();
@@ -203,12 +196,9 @@ function AccountingCard({
         ) : (
           <>
             <p className="text-sm text-ink-muted">{description}</p>
-            <div className="rounded-md border border-border bg-surface-2 p-3 text-sm text-ink-muted">
-              <span className="font-medium text-ink">Mock only.</span> {limitation}
-            </div>
             <div className="flex justify-end">
               <Button onClick={save} loading={saving} variant={configured ? "secondary" : "primary"}>
-                {configured ? "Mock enabled" : "Enable mock import"}
+                {configured ? "Enabled" : "Enable mock import"}
               </Button>
             </div>
           </>
@@ -230,13 +220,11 @@ export default function SettingsPage() {
         provider="autocount"
         title="AutoCount"
         description="Pull sales invoices from AutoCount — one of Malaysia's most-used SME accounting systems."
-        limitation="AutoCount's real API documentation requires a paid SME subscription we don't have, so we can't integrate the live API. This connector imports sample invoices to demonstrate the reconciliation flow."
       />
       <AccountingCard
         provider="sql"
         title="SQL Account"
         description="Pull sales invoices from SQL Account, another leading Malaysian SME accounting system."
-        limitation="SQL Account's API is on-premise and its documentation requires a paid SME subscription, so we can't integrate the live API. This connector imports sample invoices to demonstrate the reconciliation flow."
       />
     </div>
   );
