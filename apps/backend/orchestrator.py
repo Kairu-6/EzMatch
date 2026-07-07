@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 import logging
 import httpx
@@ -19,7 +20,7 @@ from data_contracts import (
     MatchStatus,
     JobStatus,
 )
-from forex_api import get_rates_batch
+from forex_api import get_rates_batch, get_rate
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -90,7 +91,7 @@ def _fetch_transactions(db: Client, sme_id: str, days: int = LOOKBACK_DAYS) -> l
         db.table("bank_transaction")
         .select(
             "transaction_id, transaction_date, description, description_normalised, "
-            "debit_amount, credit_amount, currency_code, "
+            "reference_number, debit_amount, credit_amount, currency_code, "
             "bank_statement!inner(account_id, bank_account!inner(sme_id))"
         )
         .eq("bank_statement.bank_account.sme_id", sme_id)
@@ -105,6 +106,7 @@ def _fetch_transactions(db: Client, sme_id: str, days: int = LOOKBACK_DAYS) -> l
             transaction_date=r["transaction_date"],
             description=r["description"],
             description_normalised=r["description_normalised"],
+            reference_number=r.get("reference_number"),
             debit_amount=r["debit_amount"],
             credit_amount=r["credit_amount"],
             currency_code=r["currency_code"],
@@ -123,6 +125,108 @@ def _fetch_proofs(db: Client, sme_id: str) -> list[ProofForMatching]:
         .data
     )
     return [ProofForMatching(**r) for r in rows]
+
+# Step 3.5: Deterministic reference pre-match (DuitNow/FPX recon key)
+
+def _norm_ref(s: str | None) -> str | None:
+    """Normalise a reference for exact comparison: drop spaces/dashes, uppercase."""
+    if not s:
+        return None
+    cleaned = re.sub(r"[\s\-]", "", str(s)).upper()
+    return cleaned or None
+
+
+def _reference_pairs(
+    invoices: list[InvoiceForMatching],
+    transactions: list[TransactionForMatching],
+    proofs: list[ProofForMatching],
+) -> list[tuple[InvoiceForMatching, TransactionForMatching, ProofForMatching | None]]:
+    """Pure: find (invoice, transaction, proof?) triples that share an exact
+    DuitNow/FPX reference. A transaction matches an invoice when its
+    reference_number equals the invoice number OR an amount-corroborating proof's
+    reference. One transaction → one invoice. No DB, no side effects."""
+    txn_by_ref: dict[str, TransactionForMatching] = {}
+    for t in transactions:
+        r = _norm_ref(t.reference_number)
+        if r and r not in txn_by_ref:  # first wins; ref should be unique per txn
+            txn_by_ref[r] = t
+
+    pairs = []
+    claimed_txn: set[str] = set()
+    for inv in invoices:
+        proof = next(
+            (p for p in proofs if p.parsed_amount is not None
+             and abs(p.parsed_amount - inv.invoice_amount) < 0.01),
+            None,
+        )
+        candidates = {_norm_ref(inv.invoice_number)}
+        if proof:
+            candidates.add(_norm_ref(proof.parsed_reference))
+        candidates.discard(None)
+
+        for ref in candidates:
+            txn = txn_by_ref.get(ref)
+            if txn and txn.transaction_id not in claimed_txn:
+                pairs.append((inv, txn, proof))
+                claimed_txn.add(txn.transaction_id)
+                break
+    return pairs
+
+
+def _reference_prematch(db: Client, job_id: str, sme_id: str) -> tuple[int, set[str]]:
+    """Commit exact-reference matches through the same gate + writer the LLM path
+    uses, BEFORE any model runs. Returns (matches_written, matched_invoice_ids).
+    Because _write_match flips invoice/transaction state, matched rows drop out of
+    every later _fetch_*, so the LLM only works the unreferenced remainder."""
+    from agent.gate import decide, Verdict
+
+    invoices     = _fetch_invoices(db, sme_id)
+    transactions = _fetch_transactions(db, sme_id)
+    proofs       = _fetch_proofs(db, sme_id)
+    pairs        = _reference_pairs(invoices, transactions, proofs)
+
+    written, matched_ids, auto_count = 0, set(), 0
+    for inv, txn, proof in pairs:
+        fc, tc = inv.invoice_currency.upper(), txn.currency_code.upper()
+        if fc == tc:
+            rate_id, rate = None, 1.0
+        else:
+            rate_id, rate = get_rate(db, fc, tc, inv.invoice_date, job_id)
+
+        converted    = round(inv.invoice_amount * rate, 4)
+        txn_amount   = txn.credit_amount or 0.0
+        variance_pct = round(((txn_amount - converted) / converted) * 100, 4) if converted else 0.0
+
+        verdict, reasons = decide(0.99, variance_pct, converted, auto_count)
+        if verdict == Verdict.REJECT:
+            _log(db, job_id, "reference_match_rejected",
+                 f"Exact reference match {inv.invoice_number} → txn {txn.transaction_id[:8]} "
+                 f"rejected: {'; '.join(reasons)}",
+                 metadata={"invoice_id": inv.invoice_id, "variance_pct": variance_pct})
+            continue
+
+        force_status = (MatchStatus.AUTO if verdict == Verdict.AUTO_COMMIT
+                        else MatchStatus.PENDING_REVIEW)
+        proposal = MorpheusMatchProposal(
+            invoice_id=inv.invoice_id, transaction_id=txn.transaction_id,
+            proof_id=proof.proof_id if proof else None, confidence=0.99,
+        )
+        _write_match(db, job_id, proposal, inv, txn, rate_id, rate, force_status=force_status)
+        matched_ids.add(inv.invoice_id)
+        written += 1
+        if verdict == Verdict.AUTO_COMMIT:
+            auto_count += 1
+        _log(db, job_id, "reference_matched",
+             f"Exact FPX/DuitNow reference match: {inv.invoice_number} → txn "
+             f"{txn.transaction_id[:8]} (ref {txn.reference_number}, {force_status})",
+             metadata={"invoice_id": inv.invoice_id, "transaction_id": txn.transaction_id,
+                       "invoice_number": inv.invoice_number, "reference": txn.reference_number,
+                       "match_status": force_status.value, "variance_pct": variance_pct})
+
+    if written:
+        _log(db, job_id, "reference_prematch_done",
+             f"Reference pre-pass matched {written} invoice(s) on exact DuitNow/FPX key.")
+    return written, matched_ids
 
 # Step 4: Build Morpheus prompt
 
@@ -163,10 +267,12 @@ def _build_morpheus_prompt(job_input: OrchestratorJobInput, rates: dict) -> str:
             if txn.credit_amount
             else f"-{txn.debit_amount} {txn.currency_code} (debit)"
         )
+        ref_line = f"  reference:     {txn.reference_number}\n" if txn.reference_number else ""
         txn_blocks.append(
             f"TRANSACTION {txn.transaction_id}:\n"
             f"  date:           {txn.transaction_date}\n"
             f"  description:    {txn.description_normalised}\n"
+            f"{ref_line}"
             f"  amount:         {amount_display}\n"
         )
 
@@ -175,6 +281,7 @@ def _build_morpheus_prompt(job_input: OrchestratorJobInput, rates: dict) -> str:
 Your task: match each INVOICE to the BANK TRANSACTION that most likely represents its payment.
 
 Rules:
+- If a transaction's reference exactly matches an invoice number (or its proof reference), that is a decisive DuitNow/FPX reference match — prefer it over name/amount similarity and assign high confidence.
 - Base your matching on semantic similarity of counterparty names and descriptions.
 - Use the pre-calculated converted amounts (in MYR) to verify the amounts align within a reasonable tolerance.
 - A negative variance (transaction < converted) is normal — it means bank fees were deducted.
@@ -323,6 +430,10 @@ def run_reconciliation(sme_id: str) -> dict:
     job_id = _start_job(db, sme_id)
 
     try:
+        # Deterministic exact-reference matches first — these drop out of the
+        # fetches below, so Morpheus only handles the unreferenced remainder.
+        prematched, _ = _reference_prematch(db, job_id, sme_id)
+
         invoices     = _fetch_invoices(db, sme_id)
         transactions = _fetch_transactions(db, sme_id)
         proofs       = _fetch_proofs(db, sme_id)
@@ -331,13 +442,16 @@ def run_reconciliation(sme_id: str) -> dict:
              f"Fetched {len(invoices)} invoices, {len(transactions)} transactions, {len(proofs)} proofs.")
 
         if not invoices:
-            _log(db, job_id, "job_skipped", "No pending invoices — nothing to reconcile.")
-            _complete_job(db, job_id, matched=0, unmatched=0)
-            return {"status": "skipped", "reason": "no_pending_invoices"}
+            reason = "all_matched_by_reference" if prematched else "no_pending_invoices"
+            _log(db, job_id, "job_skipped",
+                 f"No invoices left for the matcher ({prematched} pre-matched by reference).")
+            _complete_job(db, job_id, matched=prematched, unmatched=0)
+            return {"status": "completed" if prematched else "skipped",
+                    "reason": reason, "matched_count": prematched}
 
         if not transactions:
             _log(db, job_id, "job_skipped", f"No unmatched transactions in the last {LOOKBACK_DAYS} days.")
-            _complete_job(db, job_id, matched=0, unmatched=len(invoices))
+            _complete_job(db, job_id, matched=prematched, unmatched=len(invoices))
             return {"status": "skipped", "reason": "no_transactions"}
 
         # Step 3 — FX rates
@@ -418,13 +532,14 @@ def run_reconciliation(sme_id: str) -> dict:
             _log(db, job_id, "invoice_unmatched",
                  f"Invoice {inv.invoice_number} ({inv.invoice_amount} {inv.invoice_currency}) — no match found.")
 
-        _complete_job(db, job_id, matched=matched_count, unmatched=len(unmatched))
+        total_matched = matched_count + prematched
+        _complete_job(db, job_id, matched=total_matched, unmatched=len(unmatched))
         _write_recommendation(db, sme_id, job_id, unmatched)
 
         return {
             "status":          "completed",
             "job_id":          job_id,
-            "matched_count":   matched_count,
+            "matched_count":   total_matched,
             "unmatched_count": len(unmatched),
         }
 

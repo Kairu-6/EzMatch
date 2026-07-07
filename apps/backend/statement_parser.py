@@ -31,6 +31,8 @@ logger = logging.getLogger(__name__)
 DATE_ALIASES    = {"date", "transaction date", "value date", "txn date", "posting date", "trans. date"}
 DESC_ALIASES    = {"description", "details", "particulars", "narration", "transaction details", "remarks"}
 AMOUNT_ALIASES  = {"amount", "value", "sum", "net amount"}
+REF_ALIASES     = {"reference", "reference no", "ref", "ref no", "recipient reference",
+                   "transaction reference", "payment reference", "cheque no"}
 DEBIT_ALIASES   = {"debit", "withdrawal", "dr", "dr amount", "debit amount"}
 CREDIT_ALIASES  = {"credit", "deposit", "cr", "cr amount", "credit amount"}
 BALANCE_ALIASES = {"balance", "running balance", "closing balance", "bal", "ledger balance", "available balance"}
@@ -46,6 +48,9 @@ DATE_FORMATS = [
 ]
 
 _REF_NOISE  = re.compile(r"\b(ref|ref#|txn|trx|id|no\.?)\s*[#:]?\s*[\w\-]+", flags=re.IGNORECASE)
+# Same shape as _REF_NOISE but captures the token so we can KEEP the DuitNow/FPX
+# reference (a clean recon key) instead of only stripping it from the fuzzy field.
+_REF_EXTRACT = re.compile(r"\b(?:ref|ref#|txn|trx|id|no\.?)\s*[#:]?\s*([\w\-]+)", flags=re.IGNORECASE)
 _WHITESPACE = re.compile(r"\s{2,}")
 
 # Helpers
@@ -104,6 +109,14 @@ def _normalise_description(raw: str) -> str:
     return s.upper()
 
 
+def _extract_reference(raw: str) -> str | None:
+    """Pull a DuitNow/FPX reference token out of a bank narrative (e.g.
+    'DUITNOW TRANSFER REF INV-2026-001' -> 'INV-2026-001'). Returns None if the
+    narrative carries no reference — a dedicated reference column takes priority."""
+    m = _REF_EXTRACT.search(raw or "")
+    return m.group(1) if m else None
+
+
 def _fingerprint(date_iso: str, description: str, amount: float, occurrence: int) -> str:
     payload = f"{date_iso}|{description.upper()}|{round(amount, 2)}|{occurrence}"
     return hashlib.sha256(payload.encode()).hexdigest()
@@ -160,6 +173,7 @@ def parse_bank_statement(
     desc_col    = _resolve_column(cols, DESC_ALIASES)
     amount_col  = _resolve_column(cols, AMOUNT_ALIASES)
     balance_col = _resolve_column(cols, BALANCE_ALIASES)
+    ref_col     = _resolve_column(cols, REF_ALIASES)
 
     df = _merge_debit_credit(df)
     if not amount_col:
@@ -203,6 +217,15 @@ def parse_bank_statement(
         description           = str(row[desc_col]).strip()
         description_normalised = _normalise_description(description)
 
+        # DuitNow/FPX reference: a dedicated column wins; otherwise pull it from
+        # the narrative (which _normalise_description strips out). Stored clean —
+        # the recon pre-pass normalises for exact comparison.
+        reference_number = None
+        if ref_col and pd.notna(row.get(ref_col)):
+            reference_number = str(row[ref_col]).strip() or None
+        if not reference_number:
+            reference_number = _extract_reference(description)
+
         running_balance: float | None = None
         if balance_col and pd.notna(row.get(balance_col)):
             try:
@@ -222,7 +245,7 @@ def parse_bank_statement(
                 transaction_date=date_iso,
                 description=description,
                 description_normalised=description_normalised,
-                reference_number=None,
+                reference_number=reference_number,
                 debit_amount=round(abs(amount), 2) if amount < 0 else None,
                 credit_amount=round(amount, 2)     if amount >= 0 else None,
                 currency_code=local_currency,

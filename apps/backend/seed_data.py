@@ -158,11 +158,12 @@ def _noise_txn(account_id, ccy, rng, d):
     }
 
 
-def _match_txn(account_id, base_ccy, d, desc, credit_amt):
+def _match_txn(account_id, base_ccy, d, desc, credit_amt, reference=None):
     return {
         "transaction_id": txid(account_id, d, desc, credit_amt),
         "transaction_date": d, "description": desc,
         "description_normalised": desc.upper(),
+        "reference_number": reference,
         "credit_amount": credit_amt, "debit_amount": None,
         "currency_code": base_ccy, "is_matched": False,
     }
@@ -180,12 +181,12 @@ def _inv(sme_id, num, cp, ccy, amt, idate, due, *, status="pending",
 
 def _proof(sme_id, invoice_id, amt, ccy, pdate, ref, *, sender=None, bank=None,
            account_number=None, swift=None, status="completed", error=None, tag=None,
-           uploaded=None):
+           uploaded=None, rail=None, recipient_reference=None):
     parsed = None
     if status == "completed":
         parsed = {"sender_name": sender, "receiver_name": None, "bank_name": bank,
                   "swift_code": swift, "iban": None, "account_number": account_number,
-                  "raw_text": None}
+                  "rail": rail, "recipient_reference": recipient_reference, "raw_text": None}
         parsed = {k: v for k, v in parsed.items() if v is not None}
     return {
         "proof_id": uid("proof", sme_id, ref), "sme_id": sme_id, "invoice_id": invoice_id,
@@ -286,14 +287,15 @@ def build():
         n = 0
 
         def add_db_invoice_with_match(num, cp, ccy, amt, idate, due, desc,
-                                      variance_pct=0.0, proof=None, tag=None):
+                                      variance_pct=0.0, proof=None, tag=None,
+                                      reference=None):
             nonlocal n
             inv = _inv(sme_id, num, cp, ccy, amt, idate, due, tag=tag)
             db_invoices.append(inv)
             converted = round(amt * rate_for(ccy, base), 2)
             credit = round(converted * (1 + variance_pct / 100), 2)
             day = f"2026-06-{min(28, int(idate[-2:]) + 2):02d}"
-            db_match_txns.append((day, desc, credit))
+            db_match_txns.append((day, desc, credit, reference))
             add_fx(ccy, base, idate)
             if proof:
                 db_proofs.append(proof(inv))
@@ -310,12 +312,12 @@ def build():
                                      sender="Globex Ltd", bank="Citibank", account_number="GLBX-001"))
         add_db_invoice_with_match(
             f"{sme['slug'][:3].upper()}-202", "Crescent Trading Sdn Bhd", base, 7600.0,
-            "2026-06-11", "2026-07-11", "DUITNOW CRESCENT TRADING",
+            "2026-06-11", "2026-07-11", "FPX CRESCENT TRADING",
             variance_pct=0.0,
             proof=lambda inv: _proof(sme_id, inv["invoice_id"], 7600.0, base,
                                      "2026-06-12", f"TRX-{sme['slug'][:3].upper()}-202",
                                      sender="Crescent Trading Sdn Bhd", bank="Maybank",
-                                     account_number="CRES-77"))
+                                     account_number="CRES-77", rail="FPX"))
         # Over-paid → escalate (variance beyond auto band, +4%).
         add_db_invoice_with_match(
             f"{sme['slug'][:3].upper()}-203", "Penang Foods", base, 6400.0,
@@ -356,6 +358,25 @@ def build():
                     f"WZB-21{k}", "Selat Shipping Sdn Bhd", base, 5400.0,
                     f"2026-06-1{k}", "2026-07-15", f"DUITNOW SELAT SHIPPING {k}",
                     variance_pct=0.0, tag="duplicate_invoice")
+            # Exact DuitNow reference key — clean amount → auto-commits in the
+            # deterministic pre-pass (the receipt's DuitNow ref also lands on the
+            # bank statement). The reference, not names/amount, drives the match.
+            add_db_invoice_with_match(
+                "WZB-250", "Meridian Components Sdn Bhd", base, 8800.0,
+                "2026-06-15", "2026-07-15", "DUITNOW CR REF DN-WZB-250",
+                variance_pct=-0.2, reference="DN-WZB-250", tag="reference_match_auto",
+                proof=lambda inv: _proof(sme_id, inv["invoice_id"], 8800.0, base,
+                                         "2026-06-16", "DN-WZB-250",
+                                         sender="Meridian Components Sdn Bhd", bank="CIMB",
+                                         account_number="MER-250", rail="DuitNow",
+                                         recipient_reference="DN-WZB-250"))
+            # Reference matches but the amount is off (+4%, outside the auto band) —
+            # the gate routes it to human review despite the exact-key hit. Uses the
+            # invoice number as the DuitNow recipient reference (payer typed it in).
+            add_db_invoice_with_match(
+                "WZB-251", "Meridian Components Sdn Bhd", base, 9200.0,
+                "2026-06-17", "2026-07-17", "DUITNOW CR REF WZB-251",
+                variance_pct=4.0, reference="WZB-251", tag="reference_match_wrong_amount")
 
         if sme["slug"] == "nusantara_logistics":
             # B.3 duplicate invoice: same counterparty + amount within 30 days.
@@ -408,8 +429,8 @@ def build():
 
         # ── Assemble DB statements: matching credits + deterministic noise. ──
         # Primary account: matches + noise (≥10 rows). Secondary accounts: noise only.
-        match_rows = [_match_txn(primary["account_id"], base, d, desc, amt)
-                      for (d, desc, amt) in db_match_txns]
+        match_rows = [_match_txn(primary["account_id"], base, d, desc, amt, reference=ref)
+                      for (d, desc, amt, ref) in db_match_txns]
         noise_rows = [_noise_txn(primary["account_id"], base, rng,
                                  f"2026-06-{rng.randint(1, 27):02d}")
                       for _ in range(max(0, 12 - len(match_rows)))]
@@ -455,12 +476,18 @@ def build():
                 "expected_credit_base": round(amt * rate_for(ccy, base), 2),
             })
             converted = round(amt * rate_for(ccy, base), 2)
+            # A domestic (base-currency) transfer rides DuitNow/FPX; cross-border
+            # ones are TT/SEPA and carry no Malaysian rail. The invoice number is
+            # the recipient reference the payer entered — it lands on BOTH the
+            # receipt and the bank statement, so uploads reconcile on the exact key.
+            rail = "DuitNow" if ccy == base else None
             file_proofs.append({
                 "reference": pref, "amount": amt, "currency": ccy, "date": idate,
                 "corroborates_invoice": num, "format": pfmt, "sender": cp,
+                "rail": rail, "recipient_reference": num,
             })
             file_stmt_rows.append({"date": idate, "description": f"INWARD {cp.upper()} {ccy}",
-                                   "credit": converted})
+                                   "credit": converted, "reference": num})
             add_fx(ccy, base, idate)
 
         # Statement files: one ISO/signed CSV, one dd/mm/yyyy CSV, one debit/credit XLSX.

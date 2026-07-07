@@ -68,8 +68,17 @@ def run_agent(sme_id: str, mode: str = "auto") -> dict:
     except Exception:
         pass
 
+    # Deterministic exact-reference matches first (DuitNow/FPX recon key). These
+    # commit through the same gate + writer and drop out of the loop's list_*
+    # fetches, so the agent only reasons over the unreferenced remainder.
+    try:
+        pre_written, pre_ids = orchestrator._reference_prematch(db, job_id, sme_id)
+    except Exception:
+        logger.exception("Reference pre-match failed; continuing with LLM only.")
+        pre_written, pre_ids = 0, set()
+
     ctx = {"inv_map": {}, "txn_map": {}, "proof_map": {},
-           "rates": {}, "matched_ids": set(), "auto_count": 0}
+           "rates": {}, "matched_ids": set(pre_ids), "auto_count": pre_written}
     mem = AgentMemory(db, job_id)
 
     # Choose tool-calling mode (probe). A failure here means the model is

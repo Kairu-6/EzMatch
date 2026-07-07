@@ -23,6 +23,10 @@ you matched, what you couldn't, and any signals worth a human's attention. A det
 escalates high-severity fraud signals to review regardless.
 
 Rules:
+  - A transaction's `reference` that exactly equals an invoice number (or its proof reference) is a \
+decisive DuitNow/FPX reference match — prefer it over name/amount similarity and propose it with high \
+confidence. (Obvious exact-reference matches are already committed before you start; if you still see \
+a reference match among the remaining rows, propose it.)
   - Propose with propose_match. You do NOT decide whether a match commits — a deterministic gate does, \
 using your confidence plus the amount variance. Give an HONEST, calibrated confidence (0-1) and a \
 one-line rationale. Cross-border bank fees make the received amount slightly LESS than the invoice; a \

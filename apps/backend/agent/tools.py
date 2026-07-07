@@ -43,7 +43,7 @@ def list_transactions(db, job_id, sme_id, ctx, mem, mode, lookback_days=None, **
     mem.persist("tool_result", f"Listed {len(txns)} unmatched transaction(s).", phase="plan")
     return {"count": len(txns), "transactions": [
         {"transaction_id": t.transaction_id, "date": str(t.transaction_date),
-         "description": t.description_normalised,
+         "description": t.description_normalised, "reference": t.reference_number,
          "credit": t.credit_amount, "debit": t.debit_amount,
          "currency": t.currency_code} for t in txns]}
 

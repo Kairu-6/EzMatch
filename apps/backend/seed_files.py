@@ -61,10 +61,19 @@ def _invoice_lines(inv: dict, sme: dict) -> list[str]:
 
 
 def _proof_lines(p: dict) -> list[str]:
-    return [
-        "PAYMENT ADVICE / REMITTANCE RECEIPT",
-        "",
-        f"Reference: {p['reference']}",
+    rail = p.get("rail")
+    header = f"{rail.upper()} TRANSFER RECEIPT" if rail else "PAYMENT ADVICE / REMITTANCE RECEIPT"
+    lines = [header, ""]
+    if rail:
+        lines.append(f"Payment Rail: {rail}")
+        lines.append(f"{rail} Reference No: {p['reference']}")
+    else:
+        lines.append(f"Reference: {p['reference']}")
+    # The recipient reference the payer typed — this is what the payee sees on
+    # their bank statement, so it's the reconciliation key.
+    if p.get("recipient_reference"):
+        lines.append(f"Recipient Reference: {p['recipient_reference']}")
+    lines += [
         f"Payment Date: {p['date']}",
         f"Amount Paid: {p['currency']} {p['amount']:,.2f}",
         f"Paying Party: {p['sender']}",
@@ -72,6 +81,7 @@ def _proof_lines(p: dict) -> list[str]:
         "",
         f"This confirms payment of {p['currency']} {p['amount']:,.2f}.",
     ]
+    return lines
 
 
 def _write_statement(stmt: dict, path: str) -> None:
@@ -83,11 +93,19 @@ def _write_statement(stmt: dict, path: str) -> None:
                            for r in rows])
         df.to_excel(path, index=False, engine="openpyxl")
         return
+    # Emit a Reference column when any row carries a recipient reference (the
+    # DuitNow/FPX recon key) so uploading exercises reference extraction + matching.
+    has_ref = any(r.get("reference") for r in rows)
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["Date", "Description", "Amount"])
-        for r in rows:
-            w.writerow([r["date"], r["description"], f"{r['credit']:.2f}"])
+        if has_ref:
+            w.writerow(["Date", "Description", "Reference", "Amount"])
+            for r in rows:
+                w.writerow([r["date"], r["description"], r.get("reference") or "", f"{r['credit']:.2f}"])
+        else:
+            w.writerow(["Date", "Description", "Amount"])
+            for r in rows:
+                w.writerow([r["date"], r["description"], f"{r['credit']:.2f}"])
 
 
 # ── manifest ───────────────────────────────────────────────────────
@@ -149,6 +167,7 @@ def main() -> None:
             _render_lines(_proof_lines(p), os.path.join(TEST_FILES, rel), as_png=(ext == "png"))
             proof_entries.append({"file": rel, "reference": p["reference"], "amount": p["amount"],
                                   "currency": p["currency"], "corroborates_invoice": p["corroborates_invoice"],
+                                  "rail": p.get("rail"), "recipient_reference": p.get("recipient_reference"),
                                   "parser": "PyMuPDF+Morpheus" if ext == "pdf" else "Tesseract+Morpheus"})
             counts["proofs"] += 1
 

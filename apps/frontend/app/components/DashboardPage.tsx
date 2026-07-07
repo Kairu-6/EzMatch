@@ -82,6 +82,15 @@ function curateLine(r: {
       return r.message ? { text: r.message, level: "info" } : null;
     case "match_committed":
       return { text: `Matched ${inv} to its bank payment.`, level: "success" };
+    case "reference_matched": {
+      const ref = m.reference ? ` (ref ${m.reference})` : "";
+      return m.match_status === "auto"
+        ? { text: `Matched ${inv} on exact DuitNow/FPX reference${ref}.`, level: "success" }
+        : {
+            text: `${inv} matched on DuitNow/FPX reference${ref} — routed for review (amount variance).`,
+            level: "warning",
+          };
+    }
     case "match_escalated":
       return {
         text: `${inv} routed for review — amount variance outside tolerance.`,

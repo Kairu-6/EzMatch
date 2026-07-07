@@ -36,15 +36,17 @@
     "preseeded_in_db": {
       "note": "Already loaded by seed_demo.py — do NOT upload these; they are the live reconcile/verify/anomaly demo plus a historical reconciled job.",
       "historical_matches": 5,
-      "current_pending_invoices": 9,
+      "current_pending_invoices": 11,
       "transactions": 28,
-      "payment_proofs": 2,
+      "payment_proofs": 3,
       "edge_cases_present": [
         "b2_high_value_no_proof",
         "b2_weak_link",
         "duplicate_invoice",
         "escalate_overpaid",
         "failed_parse_invoice",
+        "reference_match_auto",
+        "reference_match_wrong_amount",
         "unmatched_no_txn"
       ]
     },
@@ -144,6 +146,8 @@
           "amount": 3250.0,
           "currency": "USD",
           "corroborates_invoice": "FWZB-301",
+          "rail": null,
+          "recipient_reference": "FWZB-301",
           "parser": "PyMuPDF+Morpheus"
         },
         {
@@ -152,6 +156,8 @@
           "amount": 1840.5,
           "currency": "EUR",
           "corroborates_invoice": "FWZB-302",
+          "rail": null,
+          "recipient_reference": "FWZB-302",
           "parser": "Tesseract+Morpheus"
         },
         {
@@ -160,6 +166,8 @@
           "amount": 8000.0,
           "currency": "SGD",
           "corroborates_invoice": "FWZB-303",
+          "rail": null,
+          "recipient_reference": "FWZB-303",
           "parser": "PyMuPDF+Morpheus"
         },
         {
@@ -168,6 +176,8 @@
           "amount": 9100.0,
           "currency": "MYR",
           "corroborates_invoice": "FWZB-304",
+          "rail": "DuitNow",
+          "recipient_reference": "FWZB-304",
           "parser": "PyMuPDF+Morpheus"
         },
         {
@@ -176,6 +186,8 @@
           "amount": 2600.0,
           "currency": "EUR",
           "corroborates_invoice": "FWZB-305",
+          "rail": null,
+          "recipient_reference": "FWZB-305",
           "parser": "Tesseract+Morpheus"
         }
       ]
@@ -333,6 +345,8 @@
           "amount": 3250.0,
           "currency": "USD",
           "corroborates_invoice": "FNUS-301",
+          "rail": null,
+          "recipient_reference": "FNUS-301",
           "parser": "PyMuPDF+Morpheus"
         },
         {
@@ -341,6 +355,8 @@
           "amount": 1840.5,
           "currency": "EUR",
           "corroborates_invoice": "FNUS-302",
+          "rail": null,
+          "recipient_reference": "FNUS-302",
           "parser": "Tesseract+Morpheus"
         },
         {
@@ -349,6 +365,8 @@
           "amount": 8000.0,
           "currency": "SGD",
           "corroborates_invoice": "FNUS-303",
+          "rail": null,
+          "recipient_reference": "FNUS-303",
           "parser": "PyMuPDF+Morpheus"
         },
         {
@@ -357,6 +375,8 @@
           "amount": 9100.0,
           "currency": "MYR",
           "corroborates_invoice": "FNUS-304",
+          "rail": "DuitNow",
+          "recipient_reference": "FNUS-304",
           "parser": "PyMuPDF+Morpheus"
         },
         {
@@ -365,6 +385,8 @@
           "amount": 2600.0,
           "currency": "EUR",
           "corroborates_invoice": "FNUS-305",
+          "rail": null,
+          "recipient_reference": "FNUS-305",
           "parser": "Tesseract+Morpheus"
         }
       ]
@@ -522,6 +544,8 @@
           "amount": 3250.0,
           "currency": "USD",
           "corroborates_invoice": "FSEL-301",
+          "rail": null,
+          "recipient_reference": "FSEL-301",
           "parser": "PyMuPDF+Morpheus"
         },
         {
@@ -530,6 +554,8 @@
           "amount": 1840.5,
           "currency": "EUR",
           "corroborates_invoice": "FSEL-302",
+          "rail": null,
+          "recipient_reference": "FSEL-302",
           "parser": "Tesseract+Morpheus"
         },
         {
@@ -538,6 +564,8 @@
           "amount": 8000.0,
           "currency": "SGD",
           "corroborates_invoice": "FSEL-303",
+          "rail": null,
+          "recipient_reference": "FSEL-303",
           "parser": "PyMuPDF+Morpheus"
         },
         {
@@ -546,6 +574,8 @@
           "amount": 9100.0,
           "currency": "MYR",
           "corroborates_invoice": "FSEL-304",
+          "rail": "DuitNow",
+          "recipient_reference": "FSEL-304",
           "parser": "PyMuPDF+Morpheus"
         },
         {
@@ -554,6 +584,8 @@
           "amount": 2600.0,
           "currency": "EUR",
           "corroborates_invoice": "FSEL-305",
+          "rail": null,
+          "recipient_reference": "FSEL-305",
           "parser": "Tesseract+Morpheus"
         }
       ]
@@ -710,6 +742,8 @@
           "amount": 3250.0,
           "currency": "USD",
           "corroborates_invoice": "FPEA-301",
+          "rail": null,
+          "recipient_reference": "FPEA-301",
           "parser": "PyMuPDF+Morpheus"
         },
         {
@@ -718,6 +752,8 @@
           "amount": 1840.5,
           "currency": "EUR",
           "corroborates_invoice": "FPEA-302",
+          "rail": null,
+          "recipient_reference": "FPEA-302",
           "parser": "Tesseract+Morpheus"
         },
         {
@@ -726,6 +762,8 @@
           "amount": 8000.0,
           "currency": "SGD",
           "corroborates_invoice": "FPEA-303",
+          "rail": "DuitNow",
+          "recipient_reference": "FPEA-303",
           "parser": "PyMuPDF+Morpheus"
         },
         {
@@ -734,6 +772,8 @@
           "amount": 9100.0,
           "currency": "SGD",
           "corroborates_invoice": "FPEA-304",
+          "rail": "DuitNow",
+          "recipient_reference": "FPEA-304",
           "parser": "PyMuPDF+Morpheus"
         },
         {
@@ -742,6 +782,8 @@
           "amount": 2600.0,
           "currency": "EUR",
           "corroborates_invoice": "FPEA-305",
+          "rail": null,
+          "recipient_reference": "FPEA-305",
           "parser": "Tesseract+Morpheus"
         }
       ]

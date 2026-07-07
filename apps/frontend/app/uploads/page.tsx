@@ -60,6 +60,7 @@ type LedgerRow = {
   id: string;
   date: string;
   description: string;
+  reference: string | null; // DuitNow/FPX recon key, when present
   currency: string;
   settled: number;
   matched: boolean;
@@ -79,6 +80,7 @@ type Proof = {
   amount: number | null;
   currency: string;
   status: string; // parse_status
+  rail: string | null; // "FPX" | "DuitNow" from parsed_data
 };
 
 const proofTone = (s: string): "success" | "warning" | "danger" =>
@@ -372,6 +374,7 @@ function UploadsInner() {
             date: r.transaction_date ?? r.value_date ?? "—",
             description:
               r.description_normalised ?? r.description ?? "Bank transaction",
+            reference: r.reference_number ?? null,
             currency: r.currency_code ?? "MYR",
             settled: Math.abs(r.credit_amount ?? r.debit_amount ?? 0),
             matched: !!r.is_matched,
@@ -415,6 +418,7 @@ function UploadsInner() {
           amount: p.parsed_amount ?? null,
           currency: p.parsed_currency ?? "",
           status: p.parse_status ?? "pending",
+          rail: p.parsed_data?.rail ?? null,
         })),
       );
     }
@@ -860,7 +864,14 @@ function UploadsInner() {
                         <Td className="text-ink-muted">
                           {accountLabel(r.accountId)}
                         </Td>
-                        <Td>{r.description}</Td>
+                        <Td>
+                          {r.description}
+                          {r.reference && (
+                            <span className="block text-xs text-ink-subtle font-mono">
+                              Ref {r.reference}
+                            </span>
+                          )}
+                        </Td>
                         <Td align="right" className="font-medium">
                           {r.currency} {r.settled.toFixed(2)}
                         </Td>
@@ -1096,6 +1107,13 @@ function UploadsInner() {
                           <span className="inline-flex items-center gap-2">
                             <FileCheck2 className="w-4 h-4 text-ink-subtle" />
                             {p.reference}
+                            {p.rail && (
+                              <span title={`${p.rail} payment rail`}>
+                                <StatusPill tone="info" icon={Landmark}>
+                                  {p.rail}
+                                </StatusPill>
+                              </span>
+                            )}
                           </span>
                         </Td>
                         <Td align="right" className="font-medium">

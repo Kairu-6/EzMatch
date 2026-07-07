@@ -22,16 +22,22 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_API_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-PROOF_INSTRUCTION = """Extract these fields from the payment receipt text below and return ONLY a valid JSON object (no markdown, no commentary):
+PROOF_INSTRUCTION = """Extract these fields from the payment receipt text below and return ONLY a valid JSON object (no markdown, no commentary). Malaysian receipts are usually FPX (online banking) or DuitNow (instant transfer / QR).
 1. parsed_amount: the total amount paid as a pure float (strip commas and currency symbols).
 2. parsed_currency: 3-letter ISO currency code (e.g. MYR, USD, EUR).
 3. parsed_date: the payment date in ISO-8601 (YYYY-MM-DD).
-4. parsed_reference: the transaction ID, reference, or receipt number.
-5. sender_name: who sent the payment, or null.
-6. bank_name: the issuing bank, or null.
+4. parsed_reference: the RECIPIENT REFERENCE / payment reference / payment details the sender entered (this is what appears on the payee's bank statement — prefer it). If there is no such field, fall back to the FPX/DuitNow transaction ID or receipt number.
+5. rail: "FPX" or "DuitNow" if identifiable from the receipt, else null.
+6. recipient_reference: the recipient reference / payment details field specifically, or null.
+7. duitnow_reference: the DuitNow reference number / transaction ID, or null.
+8. fpx_transaction_id: the FPX transaction ID, or null.
+9. sender_name: who sent the payment, or null.
+10. recipient_name: who received the payment, or null.
+11. bank_name: the sender's issuing bank, or null.
+12. recipient_bank: the recipient's bank, or null.
 If a field is absent, return null.
 
-Example: {"parsed_amount":1250.0,"parsed_currency":"MYR","parsed_date":"2026-10-25","parsed_reference":"TRX-998877","sender_name":"John Doe","bank_name":"Maybank"}"""
+Example: {"parsed_amount":1250.0,"parsed_currency":"MYR","parsed_date":"2026-10-25","parsed_reference":"INV-2026-001","rail":"DuitNow","recipient_reference":"INV-2026-001","duitnow_reference":"MBBEDN2026...","fpx_transaction_id":null,"sender_name":"John Doe","recipient_name":"WZB Group","bank_name":"Maybank","recipient_bank":"CIMB"}"""
 
 
 # ══════════════════════════════════════════════════════════════════
