@@ -410,29 +410,36 @@ async def bankfeed_sync(sme_id: str = Depends(get_current_sme_id)):
         valid = _valid_currencies()
         imported = 0
         skipped_cur = 0
+        failed_links = 0
         for link in links:
-            parsed = bank_feed_client.get_transactions(link)
-            if parsed.get("status") != "success" or not parsed["data"]:
-                continue
-            # Drop rows in currencies we don't stock (testbank returns BTC etc.) — they'd
-            # violate bank_transaction's currency FK and fail the whole batch upsert.
-            rows = [r for r in parsed["data"] if r.get("currency_code") in valid]
-            skipped_cur += len(parsed["data"]) - len(rows)
-            if not rows:
-                continue
-            parsed["data"] = rows
-            stmt_id = str(uuid.uuid5(
-                uuid.NAMESPACE_URL,
-                f"finverse|{link['finverse_login_id']}|{parsed['meta']['date_range']['to']}",
-            ))
-            upload_parsed_statement(
-                parsed, stmt_id, supabase,
-                account_id=link["account_id"], sme_id=sme_id, file_type="feed",
-            )
-            imported += len(rows)
-        logger.info("Bank-feed sync for %s: imported=%d skipped_currency=%d across %d link(s)",
-                    sme_id, imported, skipped_cur, len(links))
-        return {"status": "success", "imported": imported, "skipped": skipped_cur}
+            # One stale link (login-identity token expires ~1h → 401) must not fail
+            # the whole sync — skip it and keep pulling the healthy links.
+            try:
+                parsed = bank_feed_client.get_transactions(link)
+                if parsed.get("status") != "success" or not parsed["data"]:
+                    continue
+                # Drop rows in currencies we don't stock (testbank returns BTC etc.) — they'd
+                # violate bank_transaction's currency FK and fail the whole batch upsert.
+                rows = [r for r in parsed["data"] if r.get("currency_code") in valid]
+                skipped_cur += len(parsed["data"]) - len(rows)
+                if not rows:
+                    continue
+                parsed["data"] = rows
+                stmt_id = str(uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    f"finverse|{link['finverse_login_id']}|{parsed['meta']['date_range']['to']}",
+                ))
+                upload_parsed_statement(
+                    parsed, stmt_id, supabase,
+                    account_id=link["account_id"], sme_id=sme_id, file_type="feed",
+                )
+                imported += len(rows)
+            except Exception:
+                failed_links += 1
+                logger.warning("Bank-feed sync: link %s failed, skipping.", link["link_id"], exc_info=True)
+        logger.info("Bank-feed sync for %s: imported=%d skipped_currency=%d failed_links=%d across %d link(s)",
+                    sme_id, imported, skipped_cur, failed_links, len(links))
+        return {"status": "success", "imported": imported, "skipped": skipped_cur, "failed_links": failed_links}
     except HTTPException:
         raise
     except Exception as e:
