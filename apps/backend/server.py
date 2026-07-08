@@ -184,6 +184,13 @@ async def myinvois_sync(sme_id: str = Depends(get_current_sme_id)):
     imported, skipped = 0, 0
     by_direction = {"Sent": 0, "Received": 0}
     try:
+        # Dedup against ANY existing invoice for this tenant by invoice_number too —
+        # UNIQUE(sme_id, invoice_number) rejects the whole batch otherwise, even
+        # though the upsert's on_conflict target below is (sme_id, myinvois_uuid).
+        existing_numbers = {
+            r["invoice_number"] for r in
+            supabase.table("invoice").select("invoice_number").eq("sme_id", sme_id).execute().data
+        }
         for direction in ("Sent", "Received"):
             docs = myinvois_client.get_recent_documents(creds, direction)
             uuids = [d["uuid"] for d in docs if d.get("uuid")]
@@ -209,6 +216,10 @@ async def myinvois_sync(sme_id: str = Depends(get_current_sme_id)):
                             "invoice_amount", "invoice_date")):
                     skipped += 1
                     continue
+                if row["invoice_number"] in existing_numbers:
+                    skipped += 1
+                    continue
+                existing_numbers.add(row["invoice_number"])
                 rows.append(row)
             if rows:
                 supabase.table("invoice").upsert(
@@ -267,6 +278,17 @@ async def accounting_sync(
             seen = {r["source_ref"] for r in existing}
             skipped = sum(1 for r in rows if r["source_ref"] in seen)
             rows = [r for r in rows if r["source_ref"] not in seen]
+
+        # Also dedup against ANY existing invoice for this tenant by invoice_number —
+        # UNIQUE(sme_id, invoice_number) rejects the whole batch otherwise, even
+        # though the upsert's on_conflict target below is (sme_id, source, source_ref).
+        if rows:
+            existing_numbers = {
+                r["invoice_number"] for r in
+                supabase.table("invoice").select("invoice_number").eq("sme_id", sme_id).execute().data
+            }
+            skipped += sum(1 for r in rows if r["invoice_number"] in existing_numbers)
+            rows = [r for r in rows if r["invoice_number"] not in existing_numbers]
 
         if rows:
             supabase.table("invoice").upsert(
