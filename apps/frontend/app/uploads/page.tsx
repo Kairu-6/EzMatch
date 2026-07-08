@@ -125,6 +125,7 @@ function UploadsInner() {
   const [ledger, setLedger] = useState<LedgerRow[]>([]);
   const [ledgerLoading, setLedgerLoading] = useState(true);
   const [stmtStatus, setStmtStatus] = useState<UploadStatus>("idle");
+  const [feedSyncing, setFeedSyncing] = useState(false);
 
   // Invoices state
   const [invoices, setInvoices] = useState<any[]>([]);
@@ -539,6 +540,47 @@ function UploadsInner() {
     }
   };
 
+  // ── Bank feed (Finverse): pull transactions for connected consents ──────────
+  const syncFeed = async () => {
+    setFeedSyncing(true);
+    try {
+      const res = await fetch(`${API}/api/bankfeed/sync`, { method: "POST", headers: authHeaders() });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.detail || "");
+      toast({
+        tone: "success",
+        title: `${data.imported ?? 0} transaction${data.imported === 1 ? "" : "s"} synced`,
+        description: data.imported ? "Ledger updated from your bank feed." : "No new transactions found.",
+      });
+      fetchAccounts();
+      fetchLedger();
+    } catch (e) {
+      toast({
+        tone: "danger",
+        title: "Bank sync failed",
+        description: (e as Error)?.message || "Connect a bank in Settings first.",
+      });
+    } finally {
+      setFeedSyncing(false);
+    }
+  };
+
+  // Toast the outcome of a Finverse Link redirect (?linked=1|0), once.
+  const linkedHandled = useRef(false);
+  useEffect(() => {
+    if (linkedHandled.current) return;
+    const linked = searchParams.get("linked");
+    if (linked === "1") {
+      linkedHandled.current = true;
+      toast({ tone: "success", title: "Bank connected", description: "Use “Sync bank feed” to pull your transactions." });
+      fetchAccounts();
+    } else if (linked === "0") {
+      linkedHandled.current = true;
+      toast({ tone: "danger", title: "Bank connection failed", description: "Couldn't complete authorization. Please try again." });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
   const uploadInvoice = async (files: FileList) => {
     const file = files[0];
     if (!file) return;
@@ -650,14 +692,25 @@ function UploadsInner() {
               <h3 className="text-base font-semibold text-ink flex items-center gap-2">
                 <Landmark className="w-4 h-4 text-ink-subtle" /> Bank accounts
               </h3>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => setShowAddForm((v) => !v)}
-                icon={showAddForm ? undefined : <Plus className="w-4 h-4" />}
-              >
-                {showAddForm ? "Cancel" : "Add account"}
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  loading={feedSyncing}
+                  onClick={syncFeed}
+                  icon={<RefreshCw className="w-4 h-4" />}
+                >
+                  Sync bank feed
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setShowAddForm((v) => !v)}
+                  icon={showAddForm ? undefined : <Plus className="w-4 h-4" />}
+                >
+                  {showAddForm ? "Cancel" : "Add account"}
+                </Button>
+              </div>
             </div>
             <p className="text-sm text-ink-muted mb-3">
               Choose which account this statement belongs to — its transactions

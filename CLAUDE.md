@@ -72,6 +72,55 @@ reconciliation like OCR'd invoices — **MyInvois is just another invoice source
 - **Follow-ups (not built):** submission/Peppol (MDEC accreditation); matcher
   direction-awareness (Received/payables invoices go into a sign-agnostic matcher today).
 
+## Finverse bank-feed (open banking) integration (2026-07-08)
+Pull bank transactions directly via **Finverse** (the real Plaid-for-Malaysia — Brankas does
+NOT cover MY; Finverse covers Maybank/CIMB/Public/OCBC etc.) so SMEs stop uploading a CSV
+every week. A bank feed is **just another statement source**: it lands rows through the
+existing `statement_parser.upload_parsed_statement` seam, then reconciles unchanged.
+- **NOT credential-shaped like MyInvois.** App creds are **GLOBAL** (`.env`, one developer app);
+  the per-tenant artifact is a **consent (`login_identity`)** obtained via a **three-legged
+  browser redirect** (Finverse Link). Flow: `POST /api/bankfeed/link` (JWT→state) → user
+  authorizes their bank in Finverse's hosted UI → `GET /api/bankfeed/callback` (PUBLIC, no JWT)
+  → `POST /api/bankfeed/sync`.
+- **Client:** `apps/backend/bank_feed_client.py` — `_customer_token` (`POST /auth/customer/token`,
+  in-proc cache), `create_link_session` (`POST /link/token` → hosted `link_url`), `exchange_code`
+  (`POST /auth/token` form-urlencoded → login-identity token, then poll `GET /login_identity`),
+  `get_transactions` (`GET /transactions`, paginated → parser blob). Endpoints verified from the
+  official SDK (`github.com/finversetech/sdk-typescript`). **Mock mode** (`FINVERSE_ENV=mock`,
+  default) returns static fixtures AND a `link_url` that loops straight back to our own callback,
+  so the whole consent→sync→recon path is demoable offline; set `FINVERSE_ENV=sandbox`/`prod` for
+  the real API (no code change). Self-check: run `bank_feed_client.py` / `bankfeed_state.py` directly.
+- **ONE API host for test AND live: `https://api.prod.finverse.net`** — there is NO `api.sandbox`
+  host (it fails DNS). "sandbox vs prod" is decided by which CREDENTIALS you use, not the host, so
+  `FINVERSE_ENV` is effectively mock-vs-real. **Verified live (2026-07-08):** customer-token mint
+  ✅ and `/link/token` param validation ✅ against prod with the real creds; `state` is capped at
+  100 chars by Finverse (we send a compact `sme_id.epoch.sig` ~80-char HMAC token).
+- **State/tenant routing:** `apps/backend/bankfeed_state.py` — HMAC-signed, 10-min `state` carries
+  the sme_id across the JWT-less redirect (also CSRF). The callback writes with service_role using
+  the sme_id decoded from the verified state, never a client value.
+- **Dedup:** feed rows seed `transaction_id` from Finverse's stable ULID (not the content hash), so
+  re-syncs dedup exactly via the existing account-scoped upsert. `# ponytail: an account that is
+  BOTH CSV-uploaded and feed-synced can double-count (uploads carry no stable id).`
+- **DB (migration `add_bankfeed`):** new `bank_feed_link` table (consent + tokens, PK `link_id`,
+  unique `(sme_id, finverse_login_id)`, RLS via `current_sme_id()`); `bank_statement` gained
+  `source` (default `upload`, set `bankfeed` on sync) and its `file_type` CHECK now allows `feed`.
+  No per-tenant credential table. `# ponytail: login-identity token plaintext under RLS —
+  prototype-grade, same ceiling as myinvois_credential.` `upload_parsed_statement` gained a
+  `file_type` param (default `csv`, so uploads are unchanged).
+- **Frontend:** `/settings` **BankFeedCard** (Connect button + linked-bank list + Disconnect; NO
+  creds fields) — "Connect" opens the returned `link_url`. `/uploads` statements tab: **"Sync bank
+  feed"** button + a `?linked=1` return toast. AppShell/AuthContext unchanged (callback is the
+  backend, which 302s back to the already-protected `/uploads`).
+- **⚠️ Prod creds were shared in chat once — ROTATE the client secret in `dashboard.finverse.com`
+  before any real pull.** `customer_app_id` is response-only, not an auth input.
+- **To go live (dashboard steps, not code):** rotate secret → set `FINVERSE_CLIENT_ID/SECRET` +
+  `FINVERSE_ENV=sandbox|prod` + `FINVERSE_REDIRECT_URI` (HTTPS, tunnel the backend) → register that
+  redirect_uri in the Finverse dashboard → restart. First smoke test: curl `POST /auth/customer/token`.
+- **Follow-ups (not built):** webhooks/auto-refresh (`/login_identity/refresh`, `/auth/token/refresh`),
+  consent-expiry relink, per-account split (one login → first account today), statements/PDF pull,
+  pgcrypto token encryption. Real MY-bank product entitlements + redirect_uri whitelist are only
+  confirmable against the live API.
+
 ## Backend `.env` keys
 `SUPABASE_URL`, `SUPABASE_API_KEY` (service_role), `MORPHEUS_URL`,
 `MORPHEUS_API_KEY`, `MORPHEUS_PARSE_MODEL` (=`llama-3.3-70b`),
@@ -83,6 +132,10 @@ reconciliation like OCR'd invoices — **MyInvois is just another invoice source
   `USE_AGENT=false` to force the legacy pipeline). `MORPHEUS_MODEL` (legacy matching)
   defaults to `qwen3-5-9b`, `MORPHEUS_AGENT_MODEL` to `minimax-m2.5`, both in code.
   Tuning knobs (`GATE_*`, `VERIFY_*`, `ANOMALY_*`, `LEARNED_*`, `AGENT_*`) all have code defaults.
+- **Finverse bank feed (2026-07-08):** `FINVERSE_ENV` (=`mock`, or `sandbox`/`prod`),
+  `FINVERSE_CLIENT_ID`, `FINVERSE_CLIENT_SECRET` (SECRET, `fv-c-…`), `FINVERSE_REDIRECT_URI`,
+  `FRONTEND_URL`, `BANKFEED_STATE_SECRET` (HMAC signing key). Mock needs no creds. See the
+  Finverse section above.
 
 ## Multi-tenant auth + RLS (LIVE as of 2026-06-28)
 - **Real Supabase Auth (email+password) + RLS on all 12 tables.** Each user owns one

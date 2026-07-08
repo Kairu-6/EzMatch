@@ -3,8 +3,11 @@ import os
 import shutil
 import uuid
 
+from datetime import datetime, timezone
+
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from dotenv import load_dotenv
 
 # Import the parsers and the shared supabase connection.
@@ -14,9 +17,13 @@ from invoice_parser import process_invoice
 from auth import get_current_sme_id
 import myinvois_client
 import accounting_client
+import bank_feed_client
+from bankfeed_state import sign_state, verify_state
 
 load_dotenv()
 logger = logging.getLogger(__name__)
+
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 
 app = FastAPI()
 
@@ -275,3 +282,114 @@ async def accounting_sync(
     except Exception as e:
         logger.exception("Accounting sync failed.")
         raise HTTPException(status_code=500, detail=f"Accounting sync failed: {str(e)}")
+
+
+# ── Finverse bank feed (three-legged consent) ───────────────────────────────────
+# Unlike the invoice connectors, Finverse needs the user to authorize their bank in a
+# hosted redirect. link -> (Finverse UI) -> callback -> sync. App creds are global (env);
+# the per-tenant artifact is the consent stored in bank_feed_link. See bank_feed_client.
+
+
+def _persist_link_and_accounts(sme_id: str, ident: dict):
+    """Callback-side write (service_role): auto-create a bank_account for the linked
+    Finverse account and store the consent (login_identity token) in bank_feed_link.
+    sme_id comes from the HMAC-verified state, never a client value."""
+    accts = ident.get("accounts") or []
+    if not accts:
+        raise HTTPException(status_code=502, detail="Bank returned no accounts.")
+    # ponytail: link to the first account. A login_identity can carry several accounts;
+    # per-account split (one link row each) is deferred (see plan cutline).
+    a = accts[0]
+    account_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"finverse|{sme_id}|{a['finverse_account_id']}"))
+    supabase.table("bank_account").upsert(
+        {
+            "account_id": account_id,
+            "sme_id": sme_id,
+            "bank_name": a["institution"],
+            "account_holder": a["institution"],
+            "account_number": a.get("mask") or account_id[:8],
+            "currency_code": (a.get("currency") or "MYR").upper(),
+            "is_active": True,
+            "is_primary": False,
+        },
+        on_conflict="account_id",
+    ).execute()
+
+    expires = ident.get("token_expires_at")
+    supabase.table("bank_feed_link").upsert(
+        {
+            "sme_id": sme_id,
+            "account_id": account_id,
+            "finverse_login_id": ident["finverse_login_id"],
+            "institution": a["institution"],
+            "access_token": ident.get("access_token"),
+            "refresh_token": ident.get("refresh_token"),
+            "token_expires_at": (
+                datetime.fromtimestamp(expires, tz=timezone.utc).isoformat() if expires else None
+            ),
+            "status": "active",
+        },
+        on_conflict="sme_id,finverse_login_id",
+    ).execute()
+
+
+@app.post("/api/bankfeed/link")
+async def bankfeed_link(sme_id: str = Depends(get_current_sme_id)):
+    """Start a Finverse Link session; returns the hosted URL the browser should open."""
+    try:
+        return {"link_url": bank_feed_client.create_link_session(sign_state(sme_id))}
+    except Exception as e:
+        logger.exception("Bank-feed link session failed.")
+        raise HTTPException(status_code=502, detail=f"Could not start bank link: {str(e)}")
+
+
+@app.get("/api/bankfeed/callback")
+async def bankfeed_callback(code: str, state: str):
+    """PUBLIC — Finverse's browser redirect lands here (no JWT). Tenant rides in `state`."""
+    try:
+        sme_id = verify_state(state)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid state: {e}")
+    try:
+        ident = bank_feed_client.exchange_code(code)
+        _persist_link_and_accounts(sme_id, ident)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Bank-feed callback failed.")
+        # Redirect back with an error flag so the UI can toast, not a raw 500 page.
+        return RedirectResponse(f"{FRONTEND_URL}/uploads?tab=statements&linked=0", status_code=302)
+    return RedirectResponse(f"{FRONTEND_URL}/uploads?tab=statements&linked=1", status_code=302)
+
+
+@app.post("/api/bankfeed/sync")
+async def bankfeed_sync(sme_id: str = Depends(get_current_sme_id)):
+    """Pull transactions for every active consent into bank_transaction (existing seam)."""
+    links = (
+        supabase.table("bank_feed_link")
+        .select("*").eq("sme_id", sme_id).eq("status", "active").execute().data
+    )
+    if not links:
+        raise HTTPException(status_code=400, detail="No bank connected. Link one in Settings.")
+    try:
+        imported = 0
+        for link in links:
+            parsed = bank_feed_client.get_transactions(link)
+            if parsed.get("status") != "success" or not parsed["data"]:
+                continue
+            stmt_id = str(uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"finverse|{link['finverse_login_id']}|{parsed['meta']['date_range']['to']}",
+            ))
+            upload_parsed_statement(
+                parsed, stmt_id, supabase,
+                account_id=link["account_id"], sme_id=sme_id, file_type="feed",
+            )
+            imported += len(parsed["data"])
+        logger.info("Bank-feed sync for %s: imported=%d across %d link(s)", sme_id, imported, len(links))
+        return {"status": "success", "imported": imported}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Bank-feed sync failed.")
+        raise HTTPException(status_code=500, detail=f"Bank-feed sync failed: {str(e)}")

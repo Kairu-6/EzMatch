@@ -289,6 +289,7 @@ def upload_parsed_statement(
     supabase: Any,
     account_id: str | None = None,
     sme_id: str | None = None,
+    file_type: str = "csv",
 ):
     if parsed_result.get("status") != "success":
         logger.error("Cannot upload: parsing was not successful.")
@@ -316,11 +317,16 @@ def upload_parsed_statement(
 
     # --- FIX STEP 2: Create the Parent Statement Record First ---
     meta = parsed_result["meta"]
+    # A bank-feed pull (file_type="feed") has no file; tag its provenance and skip the
+    # synthetic path. Uploads keep the existing defaults unchanged.
+    is_feed = file_type == "feed"
     statement_payload = {
         "statement_id": statement_id,
         "account_id": account_id,
-        "file_type": "csv",
-        "file_path": f"/{statement_id}.csv", # giving it a clean path just in case
+        "file_type": file_type,
+        # feeds have no file — a synthetic URI keeps the NOT NULL column honest about origin.
+        "file_path": f"finverse://{statement_id}" if is_feed else f"/{statement_id}.csv",
+        "source": "bankfeed" if is_feed else "upload",
         "period_start": meta["date_range"]["from"],
         "period_end": meta["date_range"]["to"],
     }

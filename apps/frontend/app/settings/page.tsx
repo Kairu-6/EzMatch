@@ -1,9 +1,12 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { BadgeCheck, Plug } from "lucide-react";
+import { BadgeCheck, Plug, Landmark } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../lib/AuthContext";
+
+// Backend base URL (same convention as the uploads page).
+const API = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 import { PageHeader } from "../components/ui/PageHeader";
 import { Panel, PanelHeader } from "../components/ui/Panel";
 import { Field } from "../components/ui/Field";
@@ -135,6 +138,102 @@ function MyInvoisCard() {
   );
 }
 
+/* ── Finverse bank feed (open-banking consent — no creds form) ───────────────────
+   Finverse app creds are GLOBAL (backend .env), and the per-tenant artifact is a
+   consent obtained via a hosted redirect. So this card is a Connect button + the list
+   of linked banks, not a credential form. "Connect" → backend mints a Link session →
+   we redirect to Finverse's hosted UI (or, in mock mode, straight back to /uploads). */
+function BankFeedCard() {
+  const { smeId, authHeaders } = useAuth();
+  const { toast } = useToast();
+  const [loading, setLoading] = useState(true);
+  const [connecting, setConnecting] = useState(false);
+  const [links, setLinks] = useState<any[]>([]);
+
+  const load = useCallback(async () => {
+    if (!smeId) return;
+    setLoading(true);
+    // RLS scopes this to the logged-in tenant.
+    const { data } = await supabase
+      .from("bank_feed_link")
+      .select("link_id,institution,status,created_at")
+      .eq("status", "active")
+      .order("created_at", { ascending: false });
+    setLinks(data ?? []);
+    setLoading(false);
+  }, [smeId]);
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const connect = async () => {
+    setConnecting(true);
+    try {
+      const res = await fetch(`${API}/api/bankfeed/link`, { method: "POST", headers: authHeaders() });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.link_url) throw new Error(data?.detail || "Couldn't start bank connection.");
+      // Full-page redirect: Finverse's hosted bank picker (or, in mock mode, our own
+      // callback → /uploads). App Router handles the return route with the session intact.
+      window.location.href = data.link_url;
+    } catch (e) {
+      setConnecting(false);
+      toast({ tone: "danger", title: "Connect failed", description: (e as Error)?.message || "Is the backend running on port 8000?" });
+    }
+  };
+
+  const disconnect = async (linkId: string) => {
+    const { error } = await supabase.from("bank_feed_link").update({ status: "revoked" }).eq("link_id", linkId);
+    if (error) return toast({ tone: "danger", title: "Couldn't disconnect", description: error.message });
+    toast({ tone: "success", title: "Bank disconnected" });
+    load();
+  };
+
+  return (
+    <Panel>
+      <PanelHeader
+        title="Bank feed (Finverse)"
+        icon={<Landmark className="w-4 h-4" />}
+        action={<StatusChip configured={links.length > 0} isReal />}
+      />
+      <div className="p-4 space-y-5">
+        {loading ? (
+          <SkeletonRows rows={2} cols={1} />
+        ) : (
+          <>
+            <p className="text-sm text-ink-muted">
+              Connect a bank through Finverse open banking to pull transactions automatically —
+              no more weekly CSV exports. Authorize once at your bank, then sync from the Bank
+              statements tab.
+            </p>
+            {links.length > 0 && (
+              <ul className="space-y-1.5">
+                {links.map((l) => (
+                  <li
+                    key={l.link_id}
+                    className="flex items-center justify-between rounded-md border border-border px-3 py-2"
+                  >
+                    <span className="font-medium text-ink truncate">
+                      {l.institution ?? "Connected bank"}
+                    </span>
+                    <Button size="sm" variant="ghost" onClick={() => disconnect(l.link_id)}>
+                      Disconnect
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="flex justify-end pt-1">
+              <Button onClick={connect} loading={connecting} icon={<Plug className="w-4 h-4" />}>
+                {links.length > 0 ? "Connect another bank" : "Connect bank"}
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
 /* ── AutoCount / SQL Account (mock-only) ─────────────────────────────────────────
    Both are mock-only: their real API documentation is behind a paid SME subscription
    (SQL Account is also on-premise), so we deliberately don't ship a guessed API path.
@@ -215,6 +314,7 @@ export default function SettingsPage() {
         title="Integrations"
         description="Connect the systems your invoices already live in. Configured connectors light up under “Import from connected apps” on the Invoices tab."
       />
+      <BankFeedCard />
       <MyInvoisCard />
       <AccountingCard
         provider="autocount"
