@@ -1,5 +1,6 @@
 import logging
 import os
+from datetime import datetime
 from pydantic import BaseModel, field_validator
 from enum import Enum
 import fitz  # PyMuPDF
@@ -123,6 +124,25 @@ def extract_invoice_pdf(input_data: InvoiceParserInput) -> InvoiceParserOutput:
 # ══════════════════════════════════════════════════════════════════
 # 4. ORCHESTRATOR
 # ══════════════════════════════════════════════════════════════════
+VALID_CURRENCIES = frozenset({
+    "AUD", "CNY", "EUR", "GBP", "HKD", "IDR", "INR", "JPY", "MYR", "SGD", "THB", "USD",
+})  # ponytail: mirrors the stocked currency table; extend if that grows
+
+def _validate_parsed_invoice(data: ParsedInvoiceData) -> str | None:
+    """Return an error message if the parsed data would violate a DB constraint, else None."""
+    if data.invoice_amount is None or data.invoice_amount <= 0:
+        return f"Invalid amount: {data.invoice_amount!r}"
+    if data.invoice_currency not in VALID_CURRENCIES:
+        return f"Unsupported currency '{data.invoice_currency}'"
+    for field_name in ("invoice_date", "due_date"):
+        value = getattr(data, field_name)
+        if value is not None:
+            try:
+                datetime.fromisoformat(value)
+            except ValueError:
+                return f"Invalid {field_name}: '{value}'"
+    return None
+
 def process_invoice(invoice_id: str, file_path: str, file_type: str):
     """Handle the lifecycle of an uploaded invoice."""
     parser_input = InvoiceParserInput(
@@ -142,6 +162,15 @@ def process_invoice(invoice_id: str, file_path: str, file_type: str):
             status=ParseStatus.FAILED,
             message=f"Parser exception: {str(e)}",
         )
+
+    if output.status == ParseStatus.COMPLETED and output.parsed_data:
+        validation_error = _validate_parsed_invoice(output.parsed_data)
+        if validation_error:
+            output = InvoiceParserOutput(
+                invoice_id=output.invoice_id,
+                status=ParseStatus.FAILED,
+                message=validation_error,
+            )
 
     if output.status == ParseStatus.FAILED:
         logger.warning("Invoice %s parse failed: %s", invoice_id, output.message)

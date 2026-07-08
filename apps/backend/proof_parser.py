@@ -1,5 +1,6 @@
 import logging
 import os
+from datetime import datetime
 import fitz  # PyMuPDF
 from supabase import create_client, Client
 from dotenv import load_dotenv
@@ -106,6 +107,23 @@ def extract_proof_pdf(input_data: ChutesParserInput) -> ChutesParserOutput:
 # ══════════════════════════════════════════════════════════════════
 # ORCHESTRATOR
 # ══════════════════════════════════════════════════════════════════
+VALID_CURRENCIES = frozenset({
+    "AUD", "CNY", "EUR", "GBP", "HKD", "IDR", "INR", "JPY", "MYR", "SGD", "THB", "USD",
+})  # ponytail: mirrors the stocked currency table; extend if that grows
+
+def _validate_parsed_proof(output: ChutesParserOutput) -> str | None:
+    """Return an error message if the parsed data would violate a DB constraint, else None."""
+    if output.parsed_amount is None or output.parsed_amount <= 0:
+        return f"Invalid amount: {output.parsed_amount!r}"
+    if output.parsed_currency not in VALID_CURRENCIES:
+        return f"Unsupported currency '{output.parsed_currency}'"
+    if output.parsed_date is not None:
+        try:
+            datetime.fromisoformat(output.parsed_date)
+        except ValueError:
+            return f"Invalid parsed_date: '{output.parsed_date}'"
+    return None
+
 def process_payment_proof(proof_id: str, file_path: str, file_type: str):
     """Handle the lifecycle of an uploaded payment proof."""
     parser_input = ChutesParserInput(
@@ -125,6 +143,15 @@ def process_payment_proof(proof_id: str, file_path: str, file_type: str):
             status=ParseStatus.FAILED,
             message=f"Parser exception: {str(e)}",
         )
+
+    if output.status == ParseStatus.COMPLETED:
+        validation_error = _validate_parsed_proof(output)
+        if validation_error:
+            output = ChutesParserOutput(
+                proof_id=output.proof_id,
+                status=ParseStatus.FAILED,
+                message=validation_error,
+            )
 
     if output.status == ParseStatus.FAILED:
         logger.warning("Proof %s parse failed: %s", proof_id, output.message)
