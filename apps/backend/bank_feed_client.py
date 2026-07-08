@@ -114,16 +114,11 @@ def create_link_session(state: str) -> str:
 
 
 # ── 2. Exchange the callback code for a login_identity + its accounts ─────────────
-def _pick(d: dict, *keys):
-    for k in keys:
-        v = d.get(k)
-        if v not in (None, ""):
-            return v
-    return None
-
-
 def exchange_code(code: str) -> dict:
-    """code -> {finverse_login_id, access_token, refresh_token, token_expires_at, accounts:[…]}."""
+    """code -> {finverse_login_id, access_token, refresh_token, token_expires_at, accounts:[…]}.
+
+    Field shapes verified from the SDK: /login_identity carries institution + per-product
+    retrieval status; accounts come from a SEPARATE GET /accounts (account_currency/account_name)."""
     if _env() == "mock":
         return _MOCK_IDENTITY
 
@@ -145,39 +140,45 @@ def exchange_code(code: str) -> dict:
     tok.raise_for_status()
     tb = tok.json()
     li_token = tb["access_token"]
+    hdr = {"Authorization": f"Bearer {li_token}"}
 
-    # Poll retrieval status until terminal (data ready), then read the accounts.
-    accounts: list[dict] = []
+    # Poll /login_identity until the ACCOUNTS product is retrieved (SUCCESS) or fails.
+    institution = "Bank"
     for _ in range(20):
-        li = httpx.get(
-            f"{_host()}/login_identity",
-            headers={"Authorization": f"Bearer {li_token}"},
-            timeout=30,
-        )
+        li = httpx.get(f"{_host()}/login_identity", headers=hdr, timeout=30)
         li.raise_for_status()
-        body = li.json().get("login_identity", li.json())
-        status = body.get("status")
-        accounts = body.get("accounts", []) or accounts
-        if status in ("DATA_RETRIEVAL_COMPLETE", "DATA_RETRIEVAL_PARTIALLY_SUCCESSFUL", "ERROR"):
+        body = li.json()
+        inst = body.get("institution") or {}
+        institution = inst.get("institution_name") or inst.get("institution_id") or institution
+        lid = body.get("login_identity") or {}
+        acc_status = (lid.get("product_status", {}).get("accounts", {}) or {}).get("status")
+        auth_status = (lid.get("authentication_status", {}) or {}).get("status")
+        if acc_status == "SUCCESS":
+            break
+        if acc_status in ("FAILED", "ERROR") or auth_status in ("FAILED", "REJECTED", "ABANDONED"):
             break
         time.sleep(3)
 
+    # Accounts live at their own endpoint.
+    acc = httpx.get(f"{_host()}/accounts", headers=hdr, timeout=30)
+    acc.raise_for_status()
+    raw_accounts = acc.json().get("accounts", []) or []
+    accounts = [
+        {
+            "finverse_account_id": a.get("account_id"),
+            "institution": institution,
+            "currency": a.get("account_currency") or "MYR",
+            "mask": a.get("account_name") or str(a.get("account_id") or "")[-4:],
+        }
+        for a in raw_accounts
+        if not a.get("is_closed")
+    ]
     return {
         "finverse_login_id": tb.get("login_identity_id"),
         "access_token": li_token,
         "refresh_token": tb.get("refresh_token"),
         "token_expires_at": time.time() + int(tb.get("expires_in", 3600)),
-        # ponytail: account field names not code-confirmed (data-track research failed on an
-        # API overload); _pick tolerates the likely variants. Verify against a live payload.
-        "accounts": [
-            {
-                "finverse_account_id": _pick(a, "account_id", "id"),
-                "institution": _pick(a, "institution_name", "institution", "institution_id") or "Bank",
-                "currency": _pick(a, "currency", "currency_code") or "MYR",
-                "mask": _pick(a, "account_number", "mask", "masked_number") or "",
-            }
-            for a in accounts
-        ],
+        "accounts": accounts,
     }
 
 

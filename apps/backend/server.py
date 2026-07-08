@@ -344,22 +344,23 @@ async def bankfeed_link(sme_id: str = Depends(get_current_sme_id)):
 
 
 @app.get("/api/bankfeed/callback")
-async def bankfeed_callback(code: str, state: str):
-    """PUBLIC — Finverse's browser redirect lands here (no JWT). Tenant rides in `state`."""
+async def bankfeed_callback(code: str = "", state: str = "", error: str = ""):
+    """PUBLIC — Finverse's browser redirect lands here (no JWT). Tenant rides in `state`.
+
+    This is a BROWSER navigation, so EVERY outcome must 302 back to the app — never return
+    JSON. Success → ?linked=1, any failure → ?linked=0 (the /uploads page toasts on both)."""
+    ok = f"{FRONTEND_URL}/uploads?tab=statements&linked=1"
+    fail = f"{FRONTEND_URL}/uploads?tab=statements&linked=0"
     try:
+        if error or not code:
+            raise ValueError(error or "missing authorization code")
         sme_id = verify_state(state)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid state: {e}")
-    try:
         ident = bank_feed_client.exchange_code(code)
         _persist_link_and_accounts(sme_id, ident)
-    except HTTPException:
-        raise
     except Exception:
         logger.exception("Bank-feed callback failed.")
-        # Redirect back with an error flag so the UI can toast, not a raw 500 page.
-        return RedirectResponse(f"{FRONTEND_URL}/uploads?tab=statements&linked=0", status_code=302)
-    return RedirectResponse(f"{FRONTEND_URL}/uploads?tab=statements&linked=1", status_code=302)
+        return RedirectResponse(fail, status_code=302)
+    return RedirectResponse(ok, status_code=302)
 
 
 @app.post("/api/bankfeed/sync")
