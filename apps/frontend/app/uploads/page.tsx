@@ -433,6 +433,37 @@ function UploadsInner() {
     fetchProofs();
   }, [fetchAccounts, fetchLedger, fetchPending, fetchProofs]);
 
+  // Poll while a row is still parsing — LLM parsing routinely outlasts the
+  // one-shot post-upload refetch below. Self-perpetuating: each fetch updates
+  // the list, which reruns this effect and schedules the next one, until
+  // nothing is pending or ~60s have passed (a backend fix guarantees stuck
+  // rows eventually flip to failed, so this always terminates).
+  const invoicePollStart = useRef<number | null>(null);
+  useEffect(() => {
+    const pending = invoices.some((inv) => !inv.invoice_number && !inv.error_message);
+    if (!pending) {
+      invoicePollStart.current = null;
+      return;
+    }
+    if (invoicePollStart.current === null) invoicePollStart.current = Date.now();
+    if (Date.now() - invoicePollStart.current > 60000) return;
+    const id = setTimeout(fetchPending, 3000);
+    return () => clearTimeout(id);
+  }, [invoices, fetchPending]);
+
+  const proofPollStart = useRef<number | null>(null);
+  useEffect(() => {
+    const pending = proofs.some((p) => p.status !== "completed" && p.status !== "failed");
+    if (!pending) {
+      proofPollStart.current = null;
+      return;
+    }
+    if (proofPollStart.current === null) proofPollStart.current = Date.now();
+    if (Date.now() - proofPollStart.current > 60000) return;
+    const id = setTimeout(fetchProofs, 3000);
+    return () => clearTimeout(id);
+  }, [proofs, fetchProofs]);
+
   const uploadStatement = async (files: FileList) => {
     const file = files[0];
     if (!file) return;
@@ -1002,9 +1033,19 @@ function UploadsInner() {
               title="Pending invoices"
               icon={<ReceiptText className="w-4 h-4" />}
               action={
-                <span className="text-sm text-ink-muted tnum">
-                  {invoicesLoading ? "" : `${invoices.length} pending`}
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-ink-muted tnum">
+                    {invoicesLoading ? "" : `${invoices.length} pending`}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={fetchPending}
+                    icon={<RefreshCw className="w-4 h-4" />}
+                  >
+                    Refresh
+                  </Button>
+                </div>
               }
             />
             <TableScroll>
@@ -1108,9 +1149,19 @@ function UploadsInner() {
               title="Payment proofs"
               icon={<ShieldCheck className="w-4 h-4" />}
               action={
-                <span className="text-sm text-ink-muted tnum">
-                  {proofsLoading ? "" : `${proofs.length} total`}
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-ink-muted tnum">
+                    {proofsLoading ? "" : `${proofs.length} total`}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={fetchProofs}
+                    icon={<RefreshCw className="w-4 h-4" />}
+                  >
+                    Refresh
+                  </Button>
+                </div>
               }
             />
             <TableScroll>
