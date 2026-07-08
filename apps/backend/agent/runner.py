@@ -117,8 +117,9 @@ def run_agent(sme_id: str, mode: str = "auto") -> dict:
             except Exception as exc:
                 logger.exception("LLM step failed.")
                 if step == 0:
+                    # Progress = matches beyond the reference-prematch seed.
                     return _fail_or_fallback(db, job_id, sme_id, exc,
-                                             did_progress=bool(ctx["matched_ids"]))
+                                             did_progress=len(ctx["matched_ids"]) > len(pre_ids))
                 mem.persist("llm_error", f"Model call failed: {exc}", phase="act")
                 break
 
