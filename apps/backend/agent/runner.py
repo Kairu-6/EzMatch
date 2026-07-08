@@ -191,26 +191,38 @@ def run_agent(sme_id: str, mode: str = "auto") -> dict:
 
 def _finalise(db, job_id: str, sme_id: str, ctx: dict, status: str = "completed") -> dict:
     """Sweep still-unmatched invoices and write the job to a terminal state."""
-    matched_ids = ctx.get("matched_ids", set())
-    remaining = orchestrator._fetch_invoices(db, sme_id)        # only still-pending rows
-    unmatched = [inv for inv in remaining if inv.invoice_id not in matched_ids]
-    for inv in unmatched:
-        db.table("invoice").update({"status": "unmatched"}) \
-          .eq("invoice_id", inv.invoice_id).execute()
+    try:
+        matched_ids = ctx.get("matched_ids", set())
+        remaining = orchestrator._fetch_invoices(db, sme_id)        # only still-pending rows
+        unmatched = [inv for inv in remaining if inv.invoice_id not in matched_ids]
+        for inv in unmatched:
+            db.table("invoice").update({"status": "unmatched"}) \
+              .eq("invoice_id", inv.invoice_id).execute()
 
-    matched_count = len(matched_ids)
-    if status == "cancelled":
-        db.table("reconciliation_job").update({
-            "status": "cancelled",
-            "completed_at": datetime.utcnow().isoformat(),
-            "matched_count": matched_count,
-            "unmatched_count": len(unmatched),
-        }).eq("job_id", job_id).execute()
-    else:
-        orchestrator._complete_job(db, job_id, matched_count, len(unmatched))
+        matched_count = len(matched_ids)
+        if status == "cancelled":
+            db.table("reconciliation_job").update({
+                "status": "cancelled",
+                "completed_at": datetime.utcnow().isoformat(),
+                "matched_count": matched_count,
+                "unmatched_count": len(unmatched),
+            }).eq("job_id", job_id).execute()
+        else:
+            orchestrator._complete_job(db, job_id, matched_count, len(unmatched))
 
-    return {"status": status, "job_id": job_id,
-            "matched_count": matched_count, "unmatched_count": len(unmatched)}
+        return {"status": status, "job_id": job_id,
+                "matched_count": matched_count, "unmatched_count": len(unmatched)}
+    except Exception as exc:
+        # Job must never be left stuck in 'processing' — force it terminal.
+        logger.exception("Finalise failed; forcing job to failed.")
+        try:
+            db.table("reconciliation_job").update({
+                "status": orchestrator.JobStatus.FAILED,
+                "completed_at": datetime.utcnow().isoformat(),
+            }).eq("job_id", job_id).execute()
+        except Exception:
+            pass
+        return {"status": "failed", "job_id": job_id, "error": str(exc)}
 
 
 def _fail_or_fallback(db, job_id: str, sme_id: str, exc: Exception, did_progress: bool) -> dict:
