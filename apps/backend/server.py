@@ -290,6 +290,13 @@ async def accounting_sync(
 # the per-tenant artifact is the consent stored in bank_feed_link. See bank_feed_client.
 
 
+def _valid_currencies() -> set[str]:
+    """Currency codes present in the `currency` table (bank_account/bank_transaction FK to it).
+    Feed data can carry currencies we don't stock (e.g. testbank returns BTC) — filter to these."""
+    rows = supabase.table("currency").select("currency_code").execute().data or []
+    return {str(r["currency_code"]).strip().upper() for r in rows}
+
+
 def _persist_link_and_accounts(sme_id: str, ident: dict):
     """Callback-side write (service_role): auto-create a bank_account for the linked
     Finverse account and store the consent (login_identity token) in bank_feed_link.
@@ -297,9 +304,13 @@ def _persist_link_and_accounts(sme_id: str, ident: dict):
     accts = ident.get("accounts") or []
     if not accts:
         raise HTTPException(status_code=502, detail="Bank returned no accounts.")
-    # ponytail: link to the first account. A login_identity can carry several accounts;
-    # per-account split (one link row each) is deferred (see plan cutline).
-    a = accts[0]
+    # ponytail: link to the first account whose currency we actually stock (testbank hands
+    # back BTC/multi-currency accounts that would fail the FK); per-account split is deferred.
+    valid = _valid_currencies()
+    a = next((x for x in accts if (x.get("currency") or "").strip().upper() in valid), accts[0])
+    cur = (a.get("currency") or "MYR").strip().upper()
+    if cur not in valid:
+        cur = "MYR"
     account_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"finverse|{sme_id}|{a['finverse_account_id']}"))
     supabase.table("bank_account").upsert(
         {
@@ -308,7 +319,7 @@ def _persist_link_and_accounts(sme_id: str, ident: dict):
             "bank_name": a["institution"],
             "account_holder": a["institution"],
             "account_number": a.get("mask") or account_id[:8],
-            "currency_code": (a.get("currency") or "MYR").upper(),
+            "currency_code": cur,
             "is_active": True,
             "is_primary": False,
         },
@@ -349,8 +360,9 @@ async def bankfeed_callback(code: str = "", state: str = "", error: str = ""):
 
     This is a BROWSER navigation, so EVERY outcome must 302 back to the app — never return
     JSON. Success → ?linked=1, any failure → ?linked=0 (the /uploads page toasts on both)."""
-    ok = f"{FRONTEND_URL}/uploads?tab=statements&linked=1"
-    fail = f"{FRONTEND_URL}/uploads?tab=statements&linked=0"
+    # Return the user to /settings, where they started the connect — not /uploads.
+    ok = f"{FRONTEND_URL}/settings?linked=1"
+    fail = f"{FRONTEND_URL}/settings?linked=0"
     try:
         if error or not code:
             raise ValueError(error or "missing authorization code")
@@ -373,11 +385,20 @@ async def bankfeed_sync(sme_id: str = Depends(get_current_sme_id)):
     if not links:
         raise HTTPException(status_code=400, detail="No bank connected. Link one in Settings.")
     try:
+        valid = _valid_currencies()
         imported = 0
+        skipped_cur = 0
         for link in links:
             parsed = bank_feed_client.get_transactions(link)
             if parsed.get("status") != "success" or not parsed["data"]:
                 continue
+            # Drop rows in currencies we don't stock (testbank returns BTC etc.) — they'd
+            # violate bank_transaction's currency FK and fail the whole batch upsert.
+            rows = [r for r in parsed["data"] if r.get("currency_code") in valid]
+            skipped_cur += len(parsed["data"]) - len(rows)
+            if not rows:
+                continue
+            parsed["data"] = rows
             stmt_id = str(uuid.uuid5(
                 uuid.NAMESPACE_URL,
                 f"finverse|{link['finverse_login_id']}|{parsed['meta']['date_range']['to']}",
@@ -386,9 +407,10 @@ async def bankfeed_sync(sme_id: str = Depends(get_current_sme_id)):
                 parsed, stmt_id, supabase,
                 account_id=link["account_id"], sme_id=sme_id, file_type="feed",
             )
-            imported += len(parsed["data"])
-        logger.info("Bank-feed sync for %s: imported=%d across %d link(s)", sme_id, imported, len(links))
-        return {"status": "success", "imported": imported}
+            imported += len(rows)
+        logger.info("Bank-feed sync for %s: imported=%d skipped_currency=%d across %d link(s)",
+                    sme_id, imported, skipped_cur, len(links))
+        return {"status": "success", "imported": imported, "skipped": skipped_cur}
     except HTTPException:
         raise
     except Exception as e:

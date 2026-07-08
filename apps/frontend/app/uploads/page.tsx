@@ -565,22 +565,6 @@ function UploadsInner() {
     }
   };
 
-  // Toast the outcome of a Finverse Link redirect (?linked=1|0), once.
-  const linkedHandled = useRef(false);
-  useEffect(() => {
-    if (linkedHandled.current) return;
-    const linked = searchParams.get("linked");
-    if (linked === "1") {
-      linkedHandled.current = true;
-      toast({ tone: "success", title: "Bank connected", description: "Use “Sync bank feed” to pull your transactions." });
-      fetchAccounts();
-    } else if (linked === "0") {
-      linkedHandled.current = true;
-      toast({ tone: "danger", title: "Bank connection failed", description: "Couldn't complete authorization. Please try again." });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
-
   const uploadInvoice = async (files: FileList) => {
     const file = files[0];
     if (!file) return;

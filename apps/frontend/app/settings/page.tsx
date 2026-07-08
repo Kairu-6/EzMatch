@@ -166,6 +166,19 @@ function BankFeedCard() {
     load();
   }, [load]);
 
+  // Toast the outcome of the Finverse redirect (callback 302s back to /settings?linked=1|0).
+  useEffect(() => {
+    const linked = new URLSearchParams(window.location.search).get("linked");
+    if (linked === "1") {
+      toast({ tone: "success", title: "Bank connected", description: "Sync transactions from the Uploads → Bank statements tab." });
+      load();
+    } else if (linked === "0") {
+      toast({ tone: "danger", title: "Bank connection failed", description: "Couldn't complete authorization. Please try again." });
+    }
+    if (linked) window.history.replaceState({}, "", "/settings");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const connect = async () => {
     setConnecting(true);
     try {
