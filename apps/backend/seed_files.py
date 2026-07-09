@@ -29,13 +29,44 @@ TEST_FILES = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..",
 
 
 # ── document renderers ─────────────────────────────────────────────
-def _render_lines(lines: list[str], path: str, as_png: bool) -> None:
+def _render_invoice(inv: dict, sme: dict, path: str, as_png: bool) -> None:
     doc = fitz.open()
     page = doc.new_page()
-    y = 64
-    for ln in lines:
-        page.insert_text((60, y), ln, fontsize=13 if ln and ln[0] != " " else 11)
-        y += 22
+    
+    # Header background (Dark Blue)
+    page.draw_rect(fitz.Rect(0, 0, page.rect.width, 80), color=(0.1, 0.2, 0.4), fill=(0.1, 0.2, 0.4))
+    page.insert_text((50, 50), "TAX INVOICE", fontname="hebo", fontsize=24, color=(1, 1, 1))
+    page.insert_text((page.rect.width - 250, 50), sme["company_name"], fontname="helv", fontsize=14, color=(1, 1, 1))
+    
+    # Invoice Details
+    page.insert_text((50, 120), f"Invoice Number:", fontname="hebo", fontsize=11)
+    page.insert_text((150, 120), f"{inv['invoice_number']}", fontname="helv", fontsize=11)
+    page.insert_text((50, 140), f"Invoice Date:", fontname="hebo", fontsize=11)
+    page.insert_text((150, 140), f"{inv['invoice_date']}", fontname="helv", fontsize=11)
+    page.insert_text((50, 160), f"Due Date:", fontname="hebo", fontsize=11)
+    page.insert_text((150, 160), f"{inv['due_date']}", fontname="helv", fontsize=11)
+    
+    # Billed To
+    page.insert_text((page.rect.width - 250, 120), "Billed To:", fontname="hebo", fontsize=11)
+    page.insert_text((page.rect.width - 250, 140), inv["counterparty"], fontname="helv", fontsize=11)
+    
+    # Table Header (Light Grey)
+    page.draw_rect(fitz.Rect(50, 200, page.rect.width - 50, 220), color=(0.9, 0.9, 0.9), fill=(0.9, 0.9, 0.9))
+    page.insert_text((60, 214), "Description", fontname="hebo", fontsize=11)
+    page.insert_text((page.rect.width - 150, 214), "Amount", fontname="hebo", fontsize=11)
+    
+    # Table Row
+    page.insert_text((60, 240), "Professional services rendered", fontname="helv", fontsize=11)
+    page.insert_text((page.rect.width - 150, 240), f"{inv['currency']} {inv['amount']:,.2f}", fontname="helv", fontsize=11)
+    
+    # Total Footer
+    page.draw_line((50, 260), (page.rect.width - 50, 260), color=(0, 0, 0), width=1.5)
+    page.insert_text((page.rect.width - 300, 280), "Total Amount Due:", fontname="hebo", fontsize=12)
+    page.insert_text((page.rect.width - 150, 280), f"{inv['currency']} {inv['amount']:,.2f}", fontname="hebo", fontsize=12)
+    
+    # Payment Instructions
+    page.insert_text((50, 340), f"Please remit {inv['currency']} {inv['amount']:,.2f} by {inv['due_date']}.", fontname="helv", fontsize=10, color=(0.3, 0.3, 0.3))
+
     if as_png:
         page.get_pixmap(dpi=150).save(path)
     else:
@@ -43,45 +74,80 @@ def _render_lines(lines: list[str], path: str, as_png: bool) -> None:
     doc.close()
 
 
-def _invoice_lines(inv: dict, sme: dict) -> list[str]:
-    return [
-        sme["company_name"],
-        "TAX INVOICE",
-        "",
-        f"Invoice Number: {inv['invoice_number']}",
-        f"Billed To: {inv['counterparty']}",
-        f"Invoice Date: {inv['invoice_date']}",
-        f"Due Date: {inv['due_date']}",
-        "",
-        "Description: Professional services rendered",
-        f"Total Amount Due: {inv['currency']} {inv['amount']:,.2f}",
-        "",
-        f"Please remit {inv['currency']} {inv['amount']:,.2f} by {inv['due_date']}.",
-    ]
-
-
-def _proof_lines(p: dict) -> list[str]:
+def _render_proof(p: dict, path: str, as_png: bool) -> None:
+    doc = fitz.open()
     rail = p.get("rail")
-    header = f"{rail.upper()} TRANSFER RECEIPT" if rail else "PAYMENT ADVICE / REMITTANCE RECEIPT"
-    lines = [header, ""]
-    if rail:
-        lines.append(f"Payment Rail: {rail}")
-        lines.append(f"{rail} Reference No: {p['reference']}")
+    
+    # DuitNow/FPX mobile receipt shape
+    is_mobile = rail in ["DuitNow", "FPX"]
+    width = 400 if is_mobile else 595
+    height = 700 if is_mobile else 842
+    
+    page = doc.new_page(width=width, height=height)
+    
+    if is_mobile:
+        # Mobile receipt style (centered, distinct colors)
+        color = (0.8, 0.1, 0.4) if rail == "DuitNow" else (0.1, 0.3, 0.7)
+        page.draw_rect(fitz.Rect(0, 0, width, 100), color=color, fill=color)
+        page.insert_text((width/2 - 50, 40), rail, fontname="hebo", fontsize=24, color=(1, 1, 1))
+        page.insert_text((width/2 - 70, 70), "Payment Successful", fontname="helv", fontsize=14, color=(1, 1, 1))
+        
+        # Amount centered
+        page.insert_text((width/2 - 70, 160), f"{p['currency']} {p['amount']:,.2f}", fontname="hebo", fontsize=22, color=(0, 0, 0))
+        
+        y = 220
+        def add_row(lbl, val):
+            nonlocal y
+            page.insert_text((40, y), lbl, fontname="helv", fontsize=11, color=(0.4, 0.4, 0.4))
+            page.insert_text((40, y + 20), str(val), fontname="hebo", fontsize=12, color=(0, 0, 0))
+            page.draw_line((40, y+35), (width - 40, y+35), color=(0.9, 0.9, 0.9), width=1)
+            y += 50
+            
+        add_row("Reference Number", p['reference'])
+        if p.get("recipient_reference"):
+            add_row("Recipient Reference", p['recipient_reference'])
+        add_row("Date", p['date'])
+        add_row("Beneficiary Name", p['sender'])
+            
     else:
-        lines.append(f"Reference: {p['reference']}")
-    # The recipient reference the payer typed — this is what the payee sees on
-    # their bank statement, so it's the reconciliation key.
-    if p.get("recipient_reference"):
-        lines.append(f"Recipient Reference: {p['recipient_reference']}")
-    lines += [
-        f"Payment Date: {p['date']}",
-        f"Amount Paid: {p['currency']} {p['amount']:,.2f}",
-        f"Paying Party: {p['sender']}",
-        "Remitting Bank: International Settlement Bank",
-        "",
-        f"This confirms payment of {p['currency']} {p['amount']:,.2f}.",
-    ]
-    return lines
+        # Standard Wire/TT style
+        header = f"{rail.upper()} TRANSFER RECEIPT" if rail else "PAYMENT ADVICE"
+        # Header background (Green for receipt)
+        page.draw_rect(fitz.Rect(0, 0, page.rect.width, 80), color=(0.1, 0.5, 0.2), fill=(0.1, 0.5, 0.2))
+        page.insert_text((50, 50), header, fontname="hebo", fontsize=20, color=(1, 1, 1))
+        page.insert_text((page.rect.width - 250, 50), "Int'l Settlement Bank", fontname="helv", fontsize=14, color=(1, 1, 1))
+        
+        y = 120
+        def add_row(lbl, val):
+            nonlocal y
+            page.insert_text((50, y), lbl, fontname="hebo", fontsize=11)
+            page.insert_text((200, y), str(val), fontname="helv", fontsize=11)
+            page.draw_line((50, y+5), (page.rect.width - 50, y+5), color=(0.9, 0.9, 0.9), width=1)
+            y += 25
+
+        if rail:
+            add_row("Payment Rail:", rail)
+            add_row(f"{rail} Ref No:", p['reference'])
+        else:
+            add_row("Reference:", p['reference'])
+            
+        if p.get("recipient_reference"):
+            add_row("Recipient Reference:", p['recipient_reference'])
+            
+        add_row("Payment Date:", p['date'])
+        add_row("Amount Paid:", f"{p['currency']} {p['amount']:,.2f}")
+        add_row("Paying Party:", p['sender'])
+        
+        # "Stamp" style confirmation
+        y += 20
+        page.draw_rect(fitz.Rect(50, y, page.rect.width - 50, y + 40), color=(0.9, 0.95, 0.9), fill=(0.9, 0.95, 0.9))
+        page.insert_text((60, y + 25), f"CONFIRMED: Payment of {p['currency']} {p['amount']:,.2f} processed successfully.", fontname="hebo", fontsize=10, color=(0.1, 0.5, 0.2))
+
+    if as_png:
+        page.get_pixmap(dpi=150).save(path)
+    else:
+        doc.save(path)
+    doc.close()
 
 
 def _write_statement(stmt: dict, path: str) -> None:
@@ -181,8 +247,8 @@ def main() -> None:
             ext = inv["format"]
             fname = f"invoice_{inv['invoice_number']}.{ext}"
             rel = f"{slug}/invoices/{fname}"
-            _render_lines(_invoice_lines(inv, sme), os.path.join(TEST_FILES, rel),
-                          as_png=(ext == "png"))
+            _render_invoice(inv, sme, os.path.join(TEST_FILES, rel),
+                            as_png=(ext == "png"))
             inv_entries.append({"file": rel, "invoice_number": inv["invoice_number"],
                                 "counterparty": inv["counterparty"], "amount": inv["amount"],
                                 "currency": inv["currency"], "invoice_date": inv["invoice_date"],
@@ -196,7 +262,7 @@ def main() -> None:
             ext = p["format"]
             fname = f"proof_{p['reference']}.{ext}"
             rel = f"{slug}/payment_proofs/{fname}"
-            _render_lines(_proof_lines(p), os.path.join(TEST_FILES, rel), as_png=(ext == "png"))
+            _render_proof(p, os.path.join(TEST_FILES, rel), as_png=(ext == "png"))
             proof_entries.append({"file": rel, "reference": p["reference"], "amount": p["amount"],
                                   "currency": p["currency"], "corroborates_invoice": p["corroborates_invoice"],
                                   "rail": p.get("rail"), "recipient_reference": p.get("recipient_reference"),
