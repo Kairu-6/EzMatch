@@ -114,6 +114,10 @@ export default function AuditLogPage() {
         .update({ match_status: "manual" })
         .eq("match_id", e.matchId);
       error = res.error?.message ?? null;
+      // Best-effort secondary write (matchActions.ts style) — the match_status
+      // flip above is authoritative; a hiccup here shouldn't fail the resolve.
+      if (!error && e.invoiceId)
+        await supabase.from("invoice").update({ status: "matched" }).eq("invoice_id", e.invoiceId);
     } else {
       ({ error } = await rejectMatch(e));
     }
