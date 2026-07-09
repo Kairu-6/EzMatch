@@ -73,6 +73,12 @@ class AgentMemory:
             budget -= size
             kept.append(msg)
         kept.reverse()
+        # A trim can cut right after a tool call, leaving a role="tool" message
+        # whose owning assistant tool_calls message got dropped — the API 400s on
+        # an orphaned tool result. Reverse-walk means only a LEADING orphan is
+        # possible, so drop those and nothing else.
+        while kept and kept[0].get("role") == "tool":
+            kept.pop(0)
         return head + kept
 
     # ── episodic memory (durable trace) ───────────────────────────
