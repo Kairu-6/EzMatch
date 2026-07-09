@@ -474,7 +474,7 @@ export function DashboardPage() {
 
         <Panel className="p-6 flex flex-col items-center justify-center text-center">
           <p className="text-sm font-medium text-ink-muted mb-3 self-start">
-            Match accuracy
+            Successfully Matched
           </p>
           {accuracy === null ? (
             <div className="flex-1 flex flex-col items-center justify-center gap-2 py-2">
