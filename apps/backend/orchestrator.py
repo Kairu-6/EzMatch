@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 SUPABASE_URL  = os.getenv("SUPABASE_URL")
 SUPABASE_KEY  = os.getenv("SUPABASE_API_KEY")
-MORPHEUS_URL  = os.getenv("MORPHEUS_URL", "[https://api.mor.org/api/v1/chat/completions](https://api.mor.org/api/v1/chat/completions)")
+MORPHEUS_URL  = os.getenv("MORPHEUS_URL", "https://api.mor.org/api/v1")
 MORPHEUS_API_KEY      = os.getenv("MORPHEUS_API_KEY")
 # ✅ FIX 1: Set default to the working model from your test script
 MORPHEUS_MODEL        = os.getenv("MORPHEUS_MODEL", "qwen3-5-9b")
@@ -191,7 +191,12 @@ def _reference_prematch(db: Client, job_id: str, sme_id: str) -> tuple[int, set[
         if fc == tc:
             rate_id, rate = None, 1.0
         else:
-            rate_id, rate = get_rate(db, fc, tc, inv.invoice_date, job_id)
+            try:
+                rate_id, rate = get_rate(db, fc, tc, inv.invoice_date, job_id)
+            except Exception as exc:
+                logger.warning("Reference pre-match: rate lookup %s->%s failed for "
+                               "invoice %s — %s", fc, tc, inv.invoice_id, exc)
+                continue
 
         converted    = round(inv.invoice_amount * rate, 4)
         txn_amount   = txn.credit_amount or 0.0
