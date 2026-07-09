@@ -43,6 +43,14 @@ const API = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
 type Tab = "statements" | "invoices" | "proofs";
 
+// FastAPI error detail: a string, or (on 422 validation) an array of {loc,msg,type}.
+const errDetail = (data: any): string | null =>
+  typeof data?.detail === "string"
+    ? data.detail
+    : Array.isArray(data?.detail)
+      ? data.detail.map((d: any) => d?.msg ?? String(d)).join("; ")
+      : null;
+
 type Account = {
   account_id: string;
   bank_name: string;
@@ -477,7 +485,10 @@ function UploadsInner() {
         headers: authHeaders(),
         body,
       });
-      if (!res.ok) throw new Error();
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(errDetail(data) ?? "");
+      }
       setStmtStatus("done");
       toast({
         tone: "success",
@@ -488,12 +499,13 @@ function UploadsInner() {
         fetchLedger();
         setStmtStatus("idle");
       }, 2500);
-    } catch {
+    } catch (e) {
       setStmtStatus("error");
       toast({
         tone: "danger",
         title: "Upload failed",
-        description: "Couldn't reach the backend on port 8000.",
+        description:
+          (e as Error)?.message || "Couldn't reach the backend on port 8000.",
       });
       setTimeout(() => setStmtStatus("idle"), 4000);
     }
@@ -551,7 +563,7 @@ function UploadsInner() {
           : `${API}/api/accounting/sync?provider=${key}`;
       const res = await fetch(url, { method: "POST", headers: authHeaders() });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.detail || "");
+      if (!res.ok) throw new Error(errDetail(data) ?? "");
       toast({
         tone: "success",
         title: `${data.imported ?? 0} invoice${data.imported === 1 ? "" : "s"} synced`,
@@ -577,7 +589,7 @@ function UploadsInner() {
     try {
       const res = await fetch(`${API}/api/bankfeed/sync`, { method: "POST", headers: authHeaders() });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.detail || "");
+      if (!res.ok) throw new Error(errDetail(data) ?? "");
       toast({
         tone: "success",
         title: `${data.imported ?? 0} transaction${data.imported === 1 ? "" : "s"} synced`,
@@ -608,7 +620,10 @@ function UploadsInner() {
         headers: authHeaders(),
         body,
       });
-      if (!res.ok) throw new Error();
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(errDetail(data) ?? "");
+      }
       setInvStatus("done");
       toast({
         tone: "success",
@@ -619,12 +634,13 @@ function UploadsInner() {
         fetchPending();
         setInvStatus("idle");
       }, 1800);
-    } catch {
+    } catch (e) {
       setInvStatus("error");
       toast({
         tone: "danger",
         title: "Upload failed",
-        description: "Couldn't reach the backend on port 8000.",
+        description:
+          (e as Error)?.message || "Couldn't reach the backend on port 8000.",
       });
       setTimeout(() => setInvStatus("idle"), 4000);
     }
@@ -642,7 +658,10 @@ function UploadsInner() {
         headers: authHeaders(),
         body,
       });
-      if (!res.ok) throw new Error();
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(errDetail(data) ?? "");
+      }
       setProofStatus("done");
       toast({
         tone: "success",
@@ -653,12 +672,13 @@ function UploadsInner() {
         fetchProofs();
         setProofStatus("idle");
       }, 2500);
-    } catch {
+    } catch (e) {
       setProofStatus("error");
       toast({
         tone: "danger",
         title: "Upload failed",
-        description: "Couldn't reach the backend on port 8000.",
+        description:
+          (e as Error)?.message || "Couldn't reach the backend on port 8000.",
       });
       setTimeout(() => setProofStatus("idle"), 4000);
     }
