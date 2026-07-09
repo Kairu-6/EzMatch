@@ -82,3 +82,6 @@ Thumbs.db
 
 # certificates
 *.pem
+# function-catalog generator intermediates (regenerable via tools/gen_function_catalog.py)
+tools/backend_functions.json
+tools/frontend_functions.json
