@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, Suspense } from "react";
+import React, { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   FileSpreadsheet,
@@ -10,7 +10,12 @@ import {
   Landmark,
   Plus,
   Trash2,
+  RefreshCw,
+  BadgeCheck,
+  Plug,
+  ChevronDown,
 } from "lucide-react";
+import Link from "next/link";
 import { PageHeader } from "../components/ui/PageHeader";
 import { Panel, PanelHeader } from "../components/ui/Panel";
 import { Dropzone, type UploadStatus } from "../components/ui/Dropzone";
@@ -24,12 +29,27 @@ import { Field } from "../components/ui/Field";
 import { useToast } from "../components/ui/Toast";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../lib/AuthContext";
+import { cn } from "../components/ui/cn";
+
+const IMPORT_SOURCES = [
+  { key: "myinvois", label: "LHDN MyInvois" },
+  { key: "sql", label: "SQL Account" },
+  { key: "autocount", label: "AutoCount" },
+] as const;
 
 // Backend base URL. Set NEXT_PUBLIC_API_URL (e.g. to a tunnelled https URL)
 // when the app isn't served from the same machine as the backend.
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
 type Tab = "statements" | "invoices" | "proofs";
+
+// FastAPI error detail: a string, or (on 422 validation) an array of {loc,msg,type}.
+const errDetail = (data: any): string | null =>
+  typeof data?.detail === "string"
+    ? data.detail
+    : Array.isArray(data?.detail)
+      ? data.detail.map((d: any) => d?.msg ?? String(d)).join("; ")
+      : null;
 
 type Account = {
   account_id: string;
@@ -48,6 +68,7 @@ type LedgerRow = {
   id: string;
   date: string;
   description: string;
+  reference: string | null; // DuitNow/FPX recon key, when present
   currency: string;
   settled: number;
   matched: boolean;
@@ -67,6 +88,7 @@ type Proof = {
   amount: number | null;
   currency: string;
   status: string; // parse_status
+  rail: string | null; // "FPX" | "DuitNow" from parsed_data
 };
 
 const proofTone = (s: string): "success" | "warning" | "danger" =>
@@ -111,6 +133,7 @@ function UploadsInner() {
   const [ledger, setLedger] = useState<LedgerRow[]>([]);
   const [ledgerLoading, setLedgerLoading] = useState(true);
   const [stmtStatus, setStmtStatus] = useState<UploadStatus>("idle");
+  const [feedSyncing, setFeedSyncing] = useState(false);
 
   // Invoices state
   const [invoices, setInvoices] = useState<any[]>([]);
@@ -360,6 +383,7 @@ function UploadsInner() {
             date: r.transaction_date ?? r.value_date ?? "—",
             description:
               r.description_normalised ?? r.description ?? "Bank transaction",
+            reference: r.reference_number ?? null,
             currency: r.currency_code ?? "MYR",
             settled: Math.abs(r.credit_amount ?? r.debit_amount ?? 0),
             matched: !!r.is_matched,
@@ -403,6 +427,7 @@ function UploadsInner() {
           amount: p.parsed_amount ?? null,
           currency: p.parsed_currency ?? "",
           status: p.parse_status ?? "pending",
+          rail: p.parsed_data?.rail ?? null,
         })),
       );
     }
@@ -415,6 +440,37 @@ function UploadsInner() {
     fetchPending();
     fetchProofs();
   }, [fetchAccounts, fetchLedger, fetchPending, fetchProofs]);
+
+  // Poll while a row is still parsing — LLM parsing routinely outlasts the
+  // one-shot post-upload refetch below. Self-perpetuating: each fetch updates
+  // the list, which reruns this effect and schedules the next one, until
+  // nothing is pending or ~60s have passed (a backend fix guarantees stuck
+  // rows eventually flip to failed, so this always terminates).
+  const invoicePollStart = useRef<number | null>(null);
+  useEffect(() => {
+    const pending = invoices.some((inv) => !inv.invoice_number && !inv.error_message);
+    if (!pending) {
+      invoicePollStart.current = null;
+      return;
+    }
+    if (invoicePollStart.current === null) invoicePollStart.current = Date.now();
+    if (Date.now() - invoicePollStart.current > 60000) return;
+    const id = setTimeout(fetchPending, 3000);
+    return () => clearTimeout(id);
+  }, [invoices, fetchPending]);
+
+  const proofPollStart = useRef<number | null>(null);
+  useEffect(() => {
+    const pending = proofs.some((p) => p.status !== "completed" && p.status !== "failed");
+    if (!pending) {
+      proofPollStart.current = null;
+      return;
+    }
+    if (proofPollStart.current === null) proofPollStart.current = Date.now();
+    if (Date.now() - proofPollStart.current > 60000) return;
+    const id = setTimeout(fetchProofs, 3000);
+    return () => clearTimeout(id);
+  }, [proofs, fetchProofs]);
 
   const uploadStatement = async (files: FileList) => {
     const file = files[0];
@@ -429,7 +485,10 @@ function UploadsInner() {
         headers: authHeaders(),
         body,
       });
-      if (!res.ok) throw new Error();
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(errDetail(data) ?? "");
+      }
       setStmtStatus("done");
       toast({
         tone: "success",
@@ -440,14 +499,112 @@ function UploadsInner() {
         fetchLedger();
         setStmtStatus("idle");
       }, 2500);
-    } catch {
+    } catch (e) {
       setStmtStatus("error");
       toast({
         tone: "danger",
         title: "Upload failed",
-        description: "Couldn't reach the backend on port 8000.",
+        description:
+          (e as Error)?.message || "Couldn't reach the backend on port 8000.",
       });
       setTimeout(() => setStmtStatus("idle"), 4000);
+    }
+  };
+
+  // ── Connected apps: which invoice connectors are configured + usable ──────
+  const [connectors, setConnectors] = useState({
+    myinvois: false,
+    autocount: false,
+    sql: false,
+  });
+  const [syncing, setSyncing] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const importRef = useRef<HTMLDivElement>(null);
+
+  const fetchConnectors = useCallback(async () => {
+    // RLS scopes both reads to the logged-in tenant. A connector is "available"
+    // only if its saved config will actually run (mock, or the needed secret set).
+    const [mi, acct] = await Promise.all([
+      supabase.from("myinvois_credential").select("*").maybeSingle(),
+      supabase.from("accounting_credential").select("*"),
+    ]);
+    const m = mi.data;
+    const rows: any[] = acct.data ?? [];
+    const ac = rows.find((r) => r.provider === "autocount");
+    const sq = rows.find((r) => r.provider === "sql");
+    setConnectors({
+      myinvois: !!m && (m.environment === "mock" || (!!m.client_id && !!m.client_secret)),
+      // AutoCount + SQL are mock-only (their real API docs need a paid SME subscription).
+      autocount: !!ac && ac.environment === "mock",
+      sql: !!sq && sq.environment === "mock",
+    });
+  }, []);
+
+  useEffect(() => {
+    fetchConnectors();
+  }, [fetchConnectors]);
+
+  useEffect(() => {
+    if (!importOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (importRef.current && !importRef.current.contains(e.target as Node)) setImportOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [importOpen]);
+
+  const runImport = async (key: "myinvois" | "autocount" | "sql") => {
+    setImportOpen(false);
+    setSyncing(true);
+    try {
+      const url =
+        key === "myinvois"
+          ? `${API}/api/myinvois/sync`
+          : `${API}/api/accounting/sync?provider=${key}`;
+      const res = await fetch(url, { method: "POST", headers: authHeaders() });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(errDetail(data) ?? "");
+      toast({
+        tone: "success",
+        title: `${data.imported ?? 0} invoice${data.imported === 1 ? "" : "s"} synced`,
+        description: data.imported
+          ? "Added to pending invoices for reconciliation."
+          : "No new invoices found.",
+      });
+      fetchPending();
+    } catch (e) {
+      toast({
+        tone: "danger",
+        title: "Import failed",
+        description: (e as Error)?.message || "Couldn't reach the connector. Check Settings.",
+      });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  // ── Bank feed (Finverse): pull transactions for connected consents ──────────
+  const syncFeed = async () => {
+    setFeedSyncing(true);
+    try {
+      const res = await fetch(`${API}/api/bankfeed/sync`, { method: "POST", headers: authHeaders() });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(errDetail(data) ?? "");
+      toast({
+        tone: "success",
+        title: `${data.imported ?? 0} transaction${data.imported === 1 ? "" : "s"} synced`,
+        description: data.imported ? "Ledger updated from your bank feed." : "No new transactions found.",
+      });
+      fetchAccounts();
+      fetchLedger();
+    } catch (e) {
+      toast({
+        tone: "danger",
+        title: "Bank sync failed",
+        description: (e as Error)?.message || "Connect a bank in Settings first.",
+      });
+    } finally {
+      setFeedSyncing(false);
     }
   };
 
@@ -463,7 +620,10 @@ function UploadsInner() {
         headers: authHeaders(),
         body,
       });
-      if (!res.ok) throw new Error();
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(errDetail(data) ?? "");
+      }
       setInvStatus("done");
       toast({
         tone: "success",
@@ -474,12 +634,13 @@ function UploadsInner() {
         fetchPending();
         setInvStatus("idle");
       }, 1800);
-    } catch {
+    } catch (e) {
       setInvStatus("error");
       toast({
         tone: "danger",
         title: "Upload failed",
-        description: "Couldn't reach the backend on port 8000.",
+        description:
+          (e as Error)?.message || "Couldn't reach the backend on port 8000.",
       });
       setTimeout(() => setInvStatus("idle"), 4000);
     }
@@ -497,7 +658,10 @@ function UploadsInner() {
         headers: authHeaders(),
         body,
       });
-      if (!res.ok) throw new Error();
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(errDetail(data) ?? "");
+      }
       setProofStatus("done");
       toast({
         tone: "success",
@@ -508,12 +672,13 @@ function UploadsInner() {
         fetchProofs();
         setProofStatus("idle");
       }, 2500);
-    } catch {
+    } catch (e) {
       setProofStatus("error");
       toast({
         tone: "danger",
         title: "Upload failed",
-        description: "Couldn't reach the backend on port 8000.",
+        description:
+          (e as Error)?.message || "Couldn't reach the backend on port 8000.",
       });
       setTimeout(() => setProofStatus("idle"), 4000);
     }
@@ -562,14 +727,25 @@ function UploadsInner() {
               <h3 className="text-base font-semibold text-ink flex items-center gap-2">
                 <Landmark className="w-4 h-4 text-ink-subtle" /> Bank accounts
               </h3>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => setShowAddForm((v) => !v)}
-                icon={showAddForm ? undefined : <Plus className="w-4 h-4" />}
-              >
-                {showAddForm ? "Cancel" : "Add account"}
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  loading={feedSyncing}
+                  onClick={syncFeed}
+                  icon={<RefreshCw className="w-4 h-4" />}
+                >
+                  Sync bank feed
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setShowAddForm((v) => !v)}
+                  icon={showAddForm ? undefined : <Plus className="w-4 h-4" />}
+                >
+                  {showAddForm ? "Cancel" : "Add account"}
+                </Button>
+              </div>
             </div>
             <p className="text-sm text-ink-muted mb-3">
               Choose which account this statement belongs to — its transactions
@@ -776,7 +952,14 @@ function UploadsInner() {
                         <Td className="text-ink-muted">
                           {accountLabel(r.accountId)}
                         </Td>
-                        <Td>{r.description}</Td>
+                        <Td>
+                          {r.description}
+                          {r.reference && (
+                            <span className="block text-xs text-ink-subtle font-mono">
+                              Ref {r.reference}
+                            </span>
+                          )}
+                        </Td>
                         <Td align="right" className="font-medium">
                           {r.currency} {r.settled.toFixed(2)}
                         </Td>
@@ -798,7 +981,63 @@ function UploadsInner() {
       {/* ── Invoices ── */}
       {tab === "invoices" && (
         <div role="tabpanel" id="seg-panel-invoices" aria-labelledby="seg-tab-invoices">
-          <div className="mb-6">
+          <div className="mb-6 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm text-ink-muted">
+                Import invoices from a connected app — or upload a file below.
+              </p>
+              <div className="relative" ref={importRef}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setImportOpen((v) => !v)}
+                  loading={syncing}
+                  icon={<Plug className="w-4 h-4" />}
+                  aria-haspopup="menu"
+                  aria-expanded={importOpen}
+                >
+                  Import from connected apps
+                  <ChevronDown className={cn("w-3.5 h-3.5 transition-transform", importOpen && "rotate-180")} />
+                </Button>
+                {importOpen && (
+                  <div
+                    role="menu"
+                    className="absolute right-0 top-full mt-1.5 min-w-[240px] rounded-lg border border-border bg-surface shadow-md p-1 z-30"
+                  >
+                    {IMPORT_SOURCES.map(({ key, label }) => {
+                      const available = connectors[key];
+                      return (
+                        <button
+                          key={key}
+                          role="menuitem"
+                          disabled={!available}
+                          onClick={() => runImport(key)}
+                          className={cn(
+                            "flex w-full items-center justify-between gap-3 px-3 h-9 rounded-md text-sm transition-colors outline-none",
+                            available
+                              ? "text-ink hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent cursor-pointer"
+                              : "text-ink-subtle cursor-not-allowed",
+                          )}
+                        >
+                          <span className="flex items-center gap-2">
+                            <Plug className="w-4 h-4 shrink-0" />
+                            {label}
+                          </span>
+                          {!available && <span className="text-xs">Not configured</span>}
+                        </button>
+                      );
+                    })}
+                    <Link
+                      href="/settings"
+                      onClick={() => setImportOpen(false)}
+                      className="flex items-center gap-2 px-3 h-9 mt-1 border-t border-border rounded-md text-sm text-ink-muted hover:bg-surface-2 hover:text-ink transition-colors"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" /> Manage connectors in Settings
+                    </Link>
+                  </div>
+                )}
+              </div>
+            </div>
             <Dropzone
               accept=".pdf,.jpg,.jpeg,.png"
               onFiles={uploadInvoice}
@@ -811,12 +1050,22 @@ function UploadsInner() {
 
           <Panel className="overflow-hidden">
             <PanelHeader
-              title="Pending receivables"
+              title="Pending invoices"
               icon={<ReceiptText className="w-4 h-4" />}
               action={
-                <span className="text-sm text-ink-muted tnum">
-                  {invoicesLoading ? "" : `${invoices.length} pending`}
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-ink-muted tnum">
+                    {invoicesLoading ? "" : `${invoices.length} pending`}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={fetchPending}
+                    icon={<RefreshCw className="w-4 h-4" />}
+                  >
+                    Refresh
+                  </Button>
+                </div>
               }
             />
             <TableScroll>
@@ -855,9 +1104,25 @@ function UploadsInner() {
                               failed ? "text-ink-muted" : "text-accent-text font-medium"
                             }
                           >
-                            <span title={failed ? inv.error_message : undefined}>
-                              {inv.invoice_number ||
-                                (failed ? "Parse failed" : "Processing…")}
+                            <span className="inline-flex items-center gap-2">
+                              <span title={failed ? inv.error_message : undefined}>
+                                {inv.invoice_number ||
+                                  (failed ? "Parse failed" : "Processing…")}
+                              </span>
+                              {inv.myinvois_uuid && (
+                                <span title="Validated e-Invoice from LHDN MyInvois">
+                                  <StatusPill tone="info" icon={BadgeCheck}>
+                                    e-Invoice
+                                  </StatusPill>
+                                </span>
+                              )}
+                              {(inv.source === "autocount" || inv.source === "sql") && (
+                                <span title={`Imported from ${inv.source === "autocount" ? "AutoCount" : "SQL Account"}`}>
+                                  <StatusPill tone="info" icon={Plug}>
+                                    {inv.source === "autocount" ? "AutoCount" : "SQL Account"}
+                                  </StatusPill>
+                                </span>
+                              )}
                             </span>
                           </Td>
                           <Td>
@@ -904,9 +1169,19 @@ function UploadsInner() {
               title="Payment proofs"
               icon={<ShieldCheck className="w-4 h-4" />}
               action={
-                <span className="text-sm text-ink-muted tnum">
-                  {proofsLoading ? "" : `${proofs.length} total`}
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-ink-muted tnum">
+                    {proofsLoading ? "" : `${proofs.length} total`}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={fetchProofs}
+                    icon={<RefreshCw className="w-4 h-4" />}
+                  >
+                    Refresh
+                  </Button>
+                </div>
               }
             />
             <TableScroll>
@@ -940,6 +1215,13 @@ function UploadsInner() {
                           <span className="inline-flex items-center gap-2">
                             <FileCheck2 className="w-4 h-4 text-ink-subtle" />
                             {p.reference}
+                            {p.rail && (
+                              <span title={`${p.rail} payment rail`}>
+                                <StatusPill tone="info" icon={Landmark}>
+                                  {p.rail}
+                                </StatusPill>
+                              </span>
+                            )}
                           </span>
                         </Td>
                         <Td align="right" className="font-medium">

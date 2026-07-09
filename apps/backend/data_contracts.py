@@ -135,14 +135,20 @@ class ParsedProofData(BaseModel):
     Raw extraction detail stored in payment_proof.parsed_data (JSONB).
     All fields are optional — not every document type contains all of them.
     """
-    sender_name:       str | None = None  # who sent the payment
-    receiver_name:     str | None = None  # who received it
-    bank_name:         str | None = None  # issuing bank
-    swift_code:        str | None = None  # SWIFT/BIC if present
-    iban:              str | None = None
-    account_number:    str | None = None
-    raw_text:          str | None = None  # full OCR dump for debugging
-    confidence_scores: dict[str, float] | None = None  # per-field model confidence
+    sender_name:        str | None = None  # who sent the payment
+    receiver_name:      str | None = None  # who received it (legacy alias)
+    recipient_name:     str | None = None  # who received it (FPX/DuitNow receipts)
+    bank_name:          str | None = None  # sender's issuing bank
+    recipient_bank:     str | None = None  # recipient's bank
+    rail:               str | None = None  # "FPX" | "DuitNow" | None
+    recipient_reference: str | None = None # payer-entered ref (shows on payee statement)
+    duitnow_reference:  str | None = None  # DuitNow reference / txn id
+    fpx_transaction_id: str | None = None  # FPX transaction id
+    swift_code:         str | None = None  # SWIFT/BIC if present
+    iban:               str | None = None
+    account_number:     str | None = None
+    raw_text:           str | None = None  # full OCR dump for debugging
+    confidence_scores:  dict[str, float] | None = None  # per-field model confidence
 
 
 class ChutesParserOutput(BaseModel):
@@ -323,6 +329,7 @@ class TransactionForMatching(BaseModel):
     transaction_date:       date
     description:            str    # raw — for display
     description_normalised: str    # cleaned — what Morpheus actually reads
+    reference_number:       str | None = None  # DuitNow/FPX ref — exact recon key
     debit_amount:           float | None
     credit_amount:          float | None
     currency_code:          str

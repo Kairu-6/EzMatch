@@ -163,7 +163,7 @@ function RoiCalculator() {
             Hours spent on manual reconciliation each week
           </label>
           <p className="text-xs mb-5" style={{ color: "oklch(0.55 0.018 268)" }}>
-            Drag to estimate what TreasuryFlow AI could give back.
+            Drag to estimate what ezMatch could give back.
           </p>
           <input
             id="lp-roi"
@@ -386,7 +386,7 @@ export function LandingPage() {
         {/* Logotype */}
         <Link
           href="/"
-          aria-label="TreasuryFlow AI home"
+          aria-label="ezMatch home"
           className="flex items-center gap-2.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.71_0.15_242)]"
         >
           <span
@@ -405,7 +405,7 @@ export function LandingPage() {
             className="font-semibold text-sm tracking-tight"
             style={{ color: "oklch(0.96 0.006 262)" }}
           >
-            TreasuryFlow{" "}
+            ezMatch{" "}
             <span style={{ color: "oklch(0.49 0.018 268)", fontWeight: 400 }}>AI</span>
           </span>
         </Link>
@@ -476,7 +476,7 @@ export function LandingPage() {
                   }}
                 >
                   Stop manually tracking currency conversions and hidden banking
-                  fees. TreasuryFlow AI matches your multi-currency bank feeds to
+                  fees. ezMatch matches your multi-currency bank feeds to
                   open invoices instantly — with a full, auditable trail.
                 </p>
 
@@ -518,7 +518,7 @@ export function LandingPage() {
 
                 <div
                   role="list"
-                  aria-label="How TreasuryFlow AI works"
+                  aria-label="How ezMatch works"
                   className="flex flex-col gap-4"
                 >
                   {STEPS.map(({ num, label, desc, Icon }, i) => (
@@ -659,7 +659,7 @@ export function LandingPage() {
                   maxWidth: "52ch",
                 }}
               >
-                See how TreasuryFlow AI turns raw bank data into a clean, auditable
+                See how ezMatch turns raw bank data into a clean, auditable
                 match.
               </p>
             </Reveal>
@@ -717,7 +717,7 @@ export function LandingPage() {
                     className="text-xs font-medium"
                     style={{ color: "oklch(0.71 0.15 242)" }}
                   >
-                    The new way: TreasuryFlow AI
+                    The new way: ezMatch
                   </span>
                 </div>
                 <div className="p-4 sm:p-5 flex flex-col gap-2.5">

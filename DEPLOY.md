@@ -1,4 +1,4 @@
-# Deploying TreasuryFlow AI (demo)
+# Deploying ezMatch (demo)
 
 Three pieces; you deploy two of them:
 

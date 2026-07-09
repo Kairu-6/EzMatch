@@ -44,7 +44,11 @@ type SourceRow = {
   credit: boolean;
 };
 
-type TxRow = SourceRow & { creditAmount: number; accountId: string | null };
+type TxRow = SourceRow & {
+  creditAmount: number;
+  accountId: string | null;
+  currency: string;
+};
 
 type Account = {
   account_id: string;
@@ -82,6 +86,15 @@ function curateLine(r: {
       return r.message ? { text: r.message, level: "info" } : null;
     case "match_committed":
       return { text: `Matched ${inv} to its bank payment.`, level: "success" };
+    case "reference_matched": {
+      const ref = m.reference ? ` (ref ${m.reference})` : "";
+      return m.match_status === "auto"
+        ? { text: `Matched ${inv} on exact DuitNow/FPX reference${ref}.`, level: "success" }
+        : {
+            text: `${inv} matched on DuitNow/FPX reference${ref} — routed for review (amount variance).`,
+            level: "warning",
+          };
+    }
     case "match_escalated":
       return {
         text: `${inv} routed for review — amount variance outside tolerance.`,
@@ -228,6 +241,7 @@ export function DashboardPage() {
         credit: r.credit_amount != null,
         creditAmount: r.credit_amount ?? 0,
         accountId: st?.account_id ?? null,
+        currency: r.currency_code ?? "MYR",
       };
     });
     setAllTx(tx);
@@ -264,10 +278,10 @@ export function DashboardPage() {
       ? "MYR"
       : accounts.find((a) => a.account_id === selectedAccount)?.currency_code ??
         "MYR";
-  const fmt = (n: number) =>
+  const fmt = (n: number, currency: string = activeCurrency) =>
     new Intl.NumberFormat("en-MY", {
       style: "currency",
-      currency: activeCurrency,
+      currency,
       maximumFractionDigits: 0,
     }).format(n);
 
@@ -290,6 +304,9 @@ export function DashboardPage() {
            invoice ( invoice_number, counterparty_name ),
            bank_transaction ( bank_statement ( account_id ) )`,
         )
+        // Only accepted matches count toward reconciled totals — exclude
+        // pending_review and rejected so revoking a match updates the numbers.
+        .in("match_status", ["auto", "manual"])
         .order("matched_at", { ascending: false }),
       supabase
         .from("invoice")
@@ -587,7 +604,7 @@ export function DashboardPage() {
                         }`}
                       >
                         {r.credit ? "+" : "−"}
-                        {fmt(r.amount)}
+                        {fmt(r.amount, r.currency)}
                       </Td>
                     </Tr>
                   ))}

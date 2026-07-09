@@ -20,7 +20,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "TreasuryFlow AI — Reconciliation",
+  title: "ezMatch — Reconciliation",
   description:
     "Automated cross-border reconciliation for SMEs. Match bank transactions to invoices and payment proofs with confidence.",
 };

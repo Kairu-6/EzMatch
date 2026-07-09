@@ -5,7 +5,7 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* ─────────────────────────────────────────────────────────────
-   TreasuryFlow AI — design tokens (OKLCH)
+   ezMatch — design tokens (OKLCH)
    Lane: institutional trust, deep-indigo "tech" (synced to the
    landing page). The app is ALWAYS dark indigo — no light mode.
    Values live in :root AND .dark (identical) so the theme holds

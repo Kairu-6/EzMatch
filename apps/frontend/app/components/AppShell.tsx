@@ -6,12 +6,14 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard,
   History,
+  Clock,
   ReceiptText,
   FileSpreadsheet,
   ShieldCheck,
   LogOut,
   RefreshCw,
   Landmark,
+  Settings,
   ChevronDown,
   CircleUser,
   Menu,
@@ -32,6 +34,7 @@ type MenuLink = { href: string; label: string; icon: React.ElementType };
 const HOME_ITEMS: MenuLink[] = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/audit", label: "Audit log", icon: History },
+  { href: "/history", label: "History", icon: Clock },
 ];
 
 const UPLOAD_ITEMS: MenuLink[] = [
@@ -146,7 +149,8 @@ function TopNav() {
     setMobileOpen(false);
   }, [pathname]);
 
-  const homeActive = pathname === "/" || pathname === "/audit";
+  const homeActive =
+    pathname === "/" || pathname === "/audit" || pathname === "/history";
   const uploadActive = pathname === "/uploads";
 
   const handleSignOut = async () => {
@@ -172,7 +176,7 @@ function TopNav() {
               <Landmark className="w-4.5 h-4.5" />
             </span>
             <span className="font-semibold text-ink tracking-tight hidden sm:inline">
-              TreasuryFlow <span className="text-ink-muted font-normal">AI</span>
+              ezMatch
             </span>
           </Link>
 
@@ -235,6 +239,15 @@ function TopNav() {
                   </p>
                   <p className="text-xs text-ink-subtle">SME workspace</p>
                 </div>
+                <Link
+                  role="menuitem"
+                  href="/settings"
+                  onClick={() => setOpenId(null)}
+                  className="flex w-full items-center gap-2.5 px-3 h-9 rounded-md text-base text-ink-muted hover:bg-surface-2 hover:text-ink transition-colors outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                >
+                  <Settings className="w-4 h-4 text-ink-subtle shrink-0" />
+                  MyInvois settings
+                </Link>
                 <button
                   role="menuitem"
                   onClick={handleChangeAccount}

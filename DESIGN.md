@@ -1,6 +1,6 @@
 # Design
 
-Visual system for **TreasuryFlow AI**. Register: product. Lane: institutional trust (Mercury / Stripe) — calm, precise, banking-grade. All color in OKLCH; tokens defined in `apps/frontend/app/globals.css` and consumed as semantic Tailwind v4 classes.
+Visual system for **ezMatch**. Register: product. Lane: institutional trust (Mercury / Stripe) — calm, precise, banking-grade. All color in OKLCH; tokens defined in `apps/frontend/app/globals.css` and consumed as semantic Tailwind v4 classes.
 
 ## Theme
 

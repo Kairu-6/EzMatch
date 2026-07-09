@@ -61,10 +61,19 @@ def _invoice_lines(inv: dict, sme: dict) -> list[str]:
 
 
 def _proof_lines(p: dict) -> list[str]:
-    return [
-        "PAYMENT ADVICE / REMITTANCE RECEIPT",
-        "",
-        f"Reference: {p['reference']}",
+    rail = p.get("rail")
+    header = f"{rail.upper()} TRANSFER RECEIPT" if rail else "PAYMENT ADVICE / REMITTANCE RECEIPT"
+    lines = [header, ""]
+    if rail:
+        lines.append(f"Payment Rail: {rail}")
+        lines.append(f"{rail} Reference No: {p['reference']}")
+    else:
+        lines.append(f"Reference: {p['reference']}")
+    # The recipient reference the payer typed — this is what the payee sees on
+    # their bank statement, so it's the reconciliation key.
+    if p.get("recipient_reference"):
+        lines.append(f"Recipient Reference: {p['recipient_reference']}")
+    lines += [
         f"Payment Date: {p['date']}",
         f"Amount Paid: {p['currency']} {p['amount']:,.2f}",
         f"Paying Party: {p['sender']}",
@@ -72,6 +81,7 @@ def _proof_lines(p: dict) -> list[str]:
         "",
         f"This confirms payment of {p['currency']} {p['amount']:,.2f}.",
     ]
+    return lines
 
 
 def _write_statement(stmt: dict, path: str) -> None:
@@ -83,11 +93,51 @@ def _write_statement(stmt: dict, path: str) -> None:
                            for r in rows])
         df.to_excel(path, index=False, engine="openpyxl")
         return
+    # Emit a Reference column when any row carries a recipient reference (the
+    # DuitNow/FPX recon key) so uploading exercises reference extraction + matching.
+    has_ref = any(r.get("reference") for r in rows)
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["Date", "Description", "Amount"])
-        for r in rows:
-            w.writerow([r["date"], r["description"], f"{r['credit']:.2f}"])
+        if has_ref:
+            w.writerow(["Date", "Description", "Reference", "Amount"])
+            for r in rows:
+                w.writerow([r["date"], r["description"], r.get("reference") or "", f"{r['credit']:.2f}"])
+        else:
+            w.writerow(["Date", "Description", "Amount"])
+            for r in rows:
+                w.writerow([r["date"], r["description"], f"{r['credit']:.2f}"])
+
+
+# ── invalid files (failure-path coverage for the upload validators) ─────────────
+def _write_invalid_files(root: str) -> list[dict]:
+    """Deliberately broken uploads so the demo can show honest parse-failure states.
+    Returns manifest entries documenting the expected rejection for each."""
+    d = os.path.join(root, "_invalid")
+    os.makedirs(d, exist_ok=True)
+    # Not a real PDF (PyMuPDF can't open it) — upload as an invoice/proof.
+    with open(os.path.join(d, "corrupt.pdf"), "wb") as f:
+        f.write(b"%PDF-1.4 this is not actually a valid pdf body \x00\x01\x02 garbage")
+    # Empty statement (no rows).
+    open(os.path.join(d, "empty.csv"), "w", encoding="utf-8").close()
+    # Headers the statement parser can't map to date/description/amount.
+    with open(os.path.join(d, "bad_schema.csv"), "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["foo", "bar", "baz"])
+        w.writerow(["1", "2", "3"])
+        w.writerow(["4", "5", "6"])
+    # Unsupported file type for any uploader.
+    with open(os.path.join(d, "unsupported.txt"), "w", encoding="utf-8") as f:
+        f.write("just some plain text, not a statement/invoice/proof")
+    return [
+        {"file": "_invalid/corrupt.pdf", "upload_as": "invoice or payment_proof",
+         "expected": "parse fails → red 'Failed' pill + error_message (no readable text)"},
+        {"file": "_invalid/empty.csv", "upload_as": "bank statement",
+         "expected": "parse yields zero transactions → rejected / empty statement"},
+        {"file": "_invalid/bad_schema.csv", "upload_as": "bank statement",
+         "expected": "no mappable date/amount columns → parse error"},
+        {"file": "_invalid/unsupported.txt", "upload_as": "any",
+         "expected": "unsupported file type → upload rejected"},
+    ]
 
 
 # ── manifest ───────────────────────────────────────────────────────
@@ -149,6 +199,7 @@ def main() -> None:
             _render_lines(_proof_lines(p), os.path.join(TEST_FILES, rel), as_png=(ext == "png"))
             proof_entries.append({"file": rel, "reference": p["reference"], "amount": p["amount"],
                                   "currency": p["currency"], "corroborates_invoice": p["corroborates_invoice"],
+                                  "rail": p.get("rail"), "recipient_reference": p.get("recipient_reference"),
                                   "parser": "PyMuPDF+Morpheus" if ext == "pdf" else "Tesseract+Morpheus"})
             counts["proofs"] += 1
 
@@ -194,41 +245,69 @@ def main() -> None:
             },
         })
 
+    invalid_entries = _write_invalid_files(TEST_FILES)
+
     with open(os.path.join(TEST_FILES, "sme_infos"), "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
 
+    # Ground-truth baseline for eval_recon.py — expected correct/false outcome per
+    # pre-seeded invoice, keyed on the deterministic seed ids that land in the DB.
+    exp = data["expectations"]
+    tiers = {}
+    for e in exp:
+        tiers[e["tier"]] = tiers.get(e["tier"], 0) + 1
+    with open(os.path.join(TEST_FILES, "expected_reconciliation.json"), "w", encoding="utf-8") as f:
+        json.dump({
+            "sme_id": data["datasets"][0]["sme"]["sme_id"],
+            "note": "Ground truth for the pre-seeded set. Run reconciliation for this sme, "
+                    "then `python eval_recon.py` scores actual matches against expected_* here. "
+                    "Accuracy is deliberately < 100% (see the D/E tiers).",
+            "time_model": data["time_model"],
+            "tier_counts": dict(sorted(tiers.items())),
+            "expectations": exp,
+        }, f, indent=2, ensure_ascii=False)
+
     with open(os.path.join(TEST_FILES, "README.md"), "w", encoding="utf-8") as f:
-        f.write(_readme(data, counts))
+        f.write(_readme(data, counts, invalid_entries))
 
-    print(f"Wrote test_files for {len(manifest)} tenants -> {TEST_FILES}")
+    print(f"Wrote test_files for {len(manifest)} tenant(s) -> {TEST_FILES}")
     print(f"  {counts['statements']} statements · {counts['invoices']} invoices · "
-          f"{counts['proofs']} proofs + sme_infos + README.md")
+          f"{counts['proofs']} proofs · {len(invalid_entries)} invalid files")
+    print(f"  + sme_infos + expected_reconciliation.json ({len(exp)} scored invoices) + README.md")
 
 
-def _readme(data, counts) -> str:
+def _readme(data, counts, invalid_entries) -> str:
+    s = data["datasets"][0]["sme"]
     lines = [
         "# test_files — uploadable demo documents",
         "",
-        "These are the **file half** of the demo dataset: documents that are NOT pre-seeded",
+        "These are the **file quarter** of the demo dataset: documents that are NOT pre-seeded",
         "in the database. Upload them through the app to exercise the real parse pipeline,",
-        "then run reconciliation. The pre-seeded half (live reconcile/verify/anomaly demo +",
-        "a historical reconciled job per tenant) is loaded by `apps/backend/seed_demo.py`.",
+        "then run reconciliation. The pre-seeded bulk (live reconcile/verify/anomaly demo +",
+        "a historical reconciled job) is loaded by `apps/backend/seed_demo.py`.",
         "",
         "Regenerate everything: run `seed_demo.py` (DB) then `seed_files.py` (these files).",
         "",
-        "`sme_infos` (JSON) is the authoritative manifest: per-tenant logins, bank accounts,",
-        "what is pre-seeded vs file-only, and each upload's expected reconciliation.",
+        "`sme_infos` (JSON) is the authoritative manifest: login, bank accounts, what is",
+        "pre-seeded vs file-only, and each upload's expected reconciliation.",
+        "`expected_reconciliation.json` is the ground-truth baseline (per pre-seeded invoice)",
+        "that `eval_recon.py` scores a real reconcile run against.",
         "",
-        f"Demo password (all four logins): `{data['password']}`",
+        f"Demo login: **{s['email']}** · password `{data['password']}`",
         "",
-        "## Tenants",
+        f"## Tenant: {s['company_name']} (`{s['base_ccy']}`)",
+        "",
+        f"Folder `{s['slug']}/` — {counts['statements']} statements · {counts['invoices']} invoices · "
+        f"{counts['proofs']} proofs.",
+        "",
+        "## Invalid files (`_invalid/`) — failure-path coverage",
+        "",
+        "Upload these to show honest parse-failure/validation states:",
         "",
     ]
-    for ds in data["datasets"]:
-        s = ds["sme"]
-        lines.append(f"- **{s['company_name']}** (`{s['base_ccy']}`) — {s['email']} — folder `{s['slug']}/`")
-    lines += ["", f"Totals: {counts['statements']} statements · {counts['invoices']} invoices · "
-              f"{counts['proofs']} proofs across {len(data['datasets'])} tenants.", ""]
+    for e in invalid_entries:
+        lines.append(f"- `{e['file']}` (upload as {e['upload_as']}) → {e['expected']}")
+    lines.append("")
     return "\n".join(lines)
 
 

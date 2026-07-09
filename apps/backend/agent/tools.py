@@ -14,6 +14,7 @@ Design rules that make this safe for finance:
 
 Every tool has signature: fn(db, job_id, sme_id, ctx, mem, mode, **args) -> dict
 """
+import contextlib
 from datetime import date
 
 import orchestrator
@@ -43,7 +44,7 @@ def list_transactions(db, job_id, sme_id, ctx, mem, mode, lookback_days=None, **
     mem.persist("tool_result", f"Listed {len(txns)} unmatched transaction(s).", phase="plan")
     return {"count": len(txns), "transactions": [
         {"transaction_id": t.transaction_id, "date": str(t.transaction_date),
-         "description": t.description_normalised,
+         "description": t.description_normalised, "reference": t.reference_number,
          "credit": t.credit_amount, "debit": t.debit_amount,
          "currency": t.currency_code} for t in txns]}
 
@@ -55,6 +56,71 @@ def list_proofs(db, job_id, sme_id, ctx, mem, mode, **_):
     return {"count": len(proofs), "proofs": [
         {"proof_id": p.proof_id, "amount": p.parsed_amount, "currency": p.parsed_currency,
          "date": p.parsed_date, "reference": p.parsed_reference} for p in proofs]}
+
+
+def find_candidates(db, job_id, sme_id, ctx, mem, mode, invoice_id=None, limit=8, **_):
+    """Return the most likely UNMATCHED transactions for one invoice — a deterministic
+    shortlist scored by amount (post-FX) + date proximity + counterparty/description
+    token overlap. This is what lets the loop scale: the model reasons over ~8 candidates
+    per invoice instead of the whole ledger. Populates txn_map so propose_match can use them."""
+    inv = (ctx.get("inv_map") or {}).get(invoice_id)
+    if inv is None:
+        return {"error": "unknown_invoice_id",
+                "hint": "use an invoice_id from your current batch"}
+
+    # Fetch the unmatched-transaction universe once per run; consumed ones are filtered live.
+    txns = ctx.get("_all_txns")
+    if txns is None:
+        txns = orchestrator._fetch_transactions(db, sme_id)
+        ctx["_all_txns"] = txns
+    consumed = ctx.setdefault("consumed_txns", set())
+
+    inv_tok = verifier._tokens(inv.counterparty_name or "")
+    scored = []
+    for t in txns:
+        if t.transaction_id in consumed:
+            continue
+        credit = t.credit_amount or 0.0
+        if credit <= 0:                      # a payment received is a credit
+            continue
+        fc, tc = inv.invoice_currency.upper(), t.currency_code.upper()
+        if fc == tc:
+            rate = 1.0
+        else:
+            key = (fc, tc, str(inv.invoice_date))
+            cached = ctx.get("rates", {}).get(key)
+            if cached:
+                rate = cached[1]
+            else:
+                rid, rate = get_rate(db, fc, tc, inv.invoice_date, job_id)
+                ctx.setdefault("rates", {})[key] = (rid, rate)
+        converted = (inv.invoice_amount or 0.0) * rate
+        if converted <= 0:
+            continue
+        amt_diff = abs(credit - converted) / converted
+        amount_score = max(0.0, 1.0 - amt_diff / 0.15)     # full ≤0% off, zero ≥15% off
+        try:
+            dd = abs((date.fromisoformat(str(t.transaction_date)) - inv.invoice_date).days)
+        except Exception:
+            dd = 999
+        date_score = max(0.0, 1.0 - dd / 90.0)             # decays over ~90 days
+        txn_tok = verifier._tokens(t.description_normalised or "")
+        tok_score = len(inv_tok & txn_tok) / len(inv_tok) if inv_tok else 0.0
+        # Generous recall: keep anything with a plausible amount OR a strong name match.
+        if amount_score <= 0 and tok_score < 0.5:
+            continue
+        score = 0.55 * amount_score + 0.20 * date_score + 0.25 * tok_score
+        scored.append((score, t))
+
+    scored.sort(key=lambda s: s[0], reverse=True)
+    top = [t for _, t in scored[:int(limit or 8)]]
+    ctx.setdefault("txn_map", {}).update({t.transaction_id: t for t in top})
+    mem.persist("tool_result",
+                f"{len(top)} candidate txn(s) for {inv.invoice_number}.", phase="act")
+    return {"invoice_number": inv.invoice_number, "count": len(top), "candidates": [
+        {"transaction_id": t.transaction_id, "date": str(t.transaction_date),
+         "description": t.description_normalised, "reference": t.reference_number,
+         "credit": t.credit_amount, "currency": t.currency_code} for t in top]}
 
 
 def get_fx_rate(db, job_id, sme_id, ctx, mem, mode,
@@ -115,6 +181,7 @@ def propose_match(db, job_id, sme_id, ctx, mem, mode,
     matched_ids = ctx.setdefault("matched_ids", set())
     if invoice_id in matched_ids:
         return {"error": "already_matched", "invoice_id": invoice_id}
+    # (transaction contention is resolved atomically at commit time, below)
 
     try:
         confidence = max(0.0, min(1.0, float(confidence)))
@@ -166,11 +233,26 @@ def propose_match(db, job_id, sme_id, ctx, mem, mode,
 
     force_status = (MatchStatus.AUTO if verdict == gate.Verdict.AUTO_COMMIT
                     else MatchStatus.PENDING_REVIEW)
+    # Reserve the transaction atomically so two CONCURRENT batches can't both commit it
+    # (invoices are disjoint per batch, so only the transaction is contended). The lock is
+    # a no-op (nullcontext) in the sequential path.
+    consumed = ctx.setdefault("consumed_txns", set())
+    with (ctx.get("lock") or contextlib.nullcontext()):
+        if transaction_id in consumed:
+            return {"error": "transaction_already_matched", "transaction_id": transaction_id,
+                    "hint": "this transaction already paid another invoice; pick another candidate"}
+        consumed.add(transaction_id)
+        matched_ids.add(invoice_id)
+
     proposal = MorpheusMatchProposal(invoice_id=invoice_id, transaction_id=transaction_id,
                                      proof_id=proof_id, confidence=confidence)
-    orchestrator._write_match(db, job_id, proposal, inv, txn, rate_id, rate,
-                              force_status=force_status)
-    matched_ids.add(invoice_id)
+    try:
+        orchestrator._write_match(db, job_id, proposal, inv, txn, rate_id, rate,
+                                  force_status=force_status)
+    except Exception:                              # release the reservation on write failure
+        consumed.discard(transaction_id)
+        matched_ids.discard(invoice_id)
+        raise
 
     if verdict == gate.Verdict.AUTO_COMMIT:
         ctx["auto_count"] = ctx.get("auto_count", 0) + 1
@@ -208,6 +290,15 @@ TOOLS = [
     {"name": "list_proofs", "fn": list_proofs,
      "description": "List parsed payment proofs (id, amount, currency, date, reference) that corroborate matches.",
      "parameters": {"type": "object", "properties": {}, "required": []}},
+    {"name": "find_candidates", "fn": find_candidates,
+     "description": ("Return the most likely UNMATCHED bank transactions for ONE invoice — a "
+                     "ranked shortlist (by amount, date, and name/description similarity). Use this "
+                     "instead of listing every transaction: call it per invoice, then propose_match "
+                     "the best candidate. Already-matched transactions never appear."),
+     "parameters": {"type": "object",
+                    "properties": {"invoice_id": {"type": "string"},
+                                   "limit": {"type": "integer", "description": "max candidates (default 8)"}},
+                    "required": ["invoice_id"]}},
     {"name": "get_fx_rate", "fn": get_fx_rate,
      "description": "Get the historical FX rate for a currency pair on a date (cache-first). Use the INVOICE date.",
      "parameters": {"type": "object",
@@ -254,15 +345,24 @@ TOOLS = [
 REGISTRY = {t["name"]: t["fn"] for t in TOOLS}
 
 
-def openai_tools_param() -> list[dict]:
+# The batched loop exposes only the retrieval-driven surface: no whole-ledger list_*
+# dumps (that's what overflowed working memory), and no verify/anomaly tools (the runner
+# runs those once, globally, after all batches).
+BATCH_TOOL_NAMES = ["find_candidates", "list_proofs", "get_fx_rate", "propose_match", "finish"]
+
+
+def openai_tools_param(names: list[str] | None = None) -> list[dict]:
     return [{"type": "function",
              "function": {"name": t["name"], "description": t["description"],
-                          "parameters": t["parameters"]}} for t in TOOLS]
+                          "parameters": t["parameters"]}}
+            for t in TOOLS if names is None or t["name"] in names]
 
 
-def react_tool_descriptions() -> str:
+def react_tool_descriptions(names: list[str] | None = None) -> str:
     lines = []
     for t in TOOLS:
+        if names is not None and t["name"] not in names:
+            continue
         props = t["parameters"].get("properties", {})
         req = set(t["parameters"].get("required", []))
         sig = ", ".join((f"{k}*" if k in req else k) for k in props) or "—"

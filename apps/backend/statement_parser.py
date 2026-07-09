@@ -31,6 +31,8 @@ logger = logging.getLogger(__name__)
 DATE_ALIASES    = {"date", "transaction date", "value date", "txn date", "posting date", "trans. date"}
 DESC_ALIASES    = {"description", "details", "particulars", "narration", "transaction details", "remarks"}
 AMOUNT_ALIASES  = {"amount", "value", "sum", "net amount"}
+REF_ALIASES     = {"reference", "reference no", "ref", "ref no", "recipient reference",
+                   "transaction reference", "payment reference", "cheque no"}
 DEBIT_ALIASES   = {"debit", "withdrawal", "dr", "dr amount", "debit amount"}
 CREDIT_ALIASES  = {"credit", "deposit", "cr", "cr amount", "credit amount"}
 BALANCE_ALIASES = {"balance", "running balance", "closing balance", "bal", "ledger balance", "available balance"}
@@ -46,6 +48,9 @@ DATE_FORMATS = [
 ]
 
 _REF_NOISE  = re.compile(r"\b(ref|ref#|txn|trx|id|no\.?)\s*[#:]?\s*[\w\-]+", flags=re.IGNORECASE)
+# Same shape as _REF_NOISE but captures the token so we can KEEP the DuitNow/FPX
+# reference (a clean recon key) instead of only stripping it from the fuzzy field.
+_REF_EXTRACT = re.compile(r"\b(?:ref|ref#|txn|trx|id|no\.?)\s*[#:]?\s*([\w\-]+)", flags=re.IGNORECASE)
 _WHITESPACE = re.compile(r"\s{2,}")
 
 # Helpers
@@ -104,6 +109,14 @@ def _normalise_description(raw: str) -> str:
     return s.upper()
 
 
+def _extract_reference(raw: str) -> str | None:
+    """Pull a DuitNow/FPX reference token out of a bank narrative (e.g.
+    'DUITNOW TRANSFER REF INV-2026-001' -> 'INV-2026-001'). Returns None if the
+    narrative carries no reference — a dedicated reference column takes priority."""
+    m = _REF_EXTRACT.search(raw or "")
+    return m.group(1) if m else None
+
+
 def _fingerprint(date_iso: str, description: str, amount: float, occurrence: int) -> str:
     payload = f"{date_iso}|{description.upper()}|{round(amount, 2)}|{occurrence}"
     return hashlib.sha256(payload.encode()).hexdigest()
@@ -116,8 +129,18 @@ def _merge_debit_credit(df: pd.DataFrame) -> pd.DataFrame:
 
     if debit_col and credit_col:
         logger.info("Split debit/credit columns detected — merging into signed 'amount'.")
-        debit  = df[debit_col].apply(lambda x: -abs(_clean_amount(x)) if pd.notna(x) and str(x).strip() else 0.0)
-        credit = df[credit_col].apply(lambda x: abs(_clean_amount(x)) if pd.notna(x) and str(x).strip() else 0.0)
+        # Placeholder cells ("-", "N/A", blank) aren't numbers — treat as 0.0 instead
+        # of letting _clean_amount's ValueError abort the whole upload.
+        def _cell(x: Any) -> float:
+            if pd.isna(x) or not str(x).strip():
+                return 0.0
+            try:
+                return _clean_amount(x)
+            except ValueError:
+                return 0.0
+
+        debit  = df[debit_col].apply(lambda x: -abs(_cell(x)))
+        credit = df[credit_col].apply(lambda x: abs(_cell(x)))
         df["amount"] = debit + credit
         df.drop(columns=[debit_col, credit_col], inplace=True)
 
@@ -160,6 +183,7 @@ def parse_bank_statement(
     desc_col    = _resolve_column(cols, DESC_ALIASES)
     amount_col  = _resolve_column(cols, AMOUNT_ALIASES)
     balance_col = _resolve_column(cols, BALANCE_ALIASES)
+    ref_col     = _resolve_column(cols, REF_ALIASES)
 
     df = _merge_debit_credit(df)
     if not amount_col:
@@ -203,6 +227,15 @@ def parse_bank_statement(
         description           = str(row[desc_col]).strip()
         description_normalised = _normalise_description(description)
 
+        # DuitNow/FPX reference: a dedicated column wins; otherwise pull it from
+        # the narrative (which _normalise_description strips out). Stored clean —
+        # the recon pre-pass normalises for exact comparison.
+        reference_number = None
+        if ref_col and pd.notna(row.get(ref_col)):
+            reference_number = str(row[ref_col]).strip() or None
+        if not reference_number:
+            reference_number = _extract_reference(description)
+
         running_balance: float | None = None
         if balance_col and pd.notna(row.get(balance_col)):
             try:
@@ -222,7 +255,7 @@ def parse_bank_statement(
                 transaction_date=date_iso,
                 description=description,
                 description_normalised=description_normalised,
-                reference_number=None,
+                reference_number=reference_number,
                 debit_amount=round(abs(amount), 2) if amount < 0 else None,
                 credit_amount=round(amount, 2)     if amount >= 0 else None,
                 currency_code=local_currency,
@@ -266,6 +299,7 @@ def upload_parsed_statement(
     supabase: Any,
     account_id: str | None = None,
     sme_id: str | None = None,
+    file_type: str = "csv",
 ):
     if parsed_result.get("status") != "success":
         logger.error("Cannot upload: parsing was not successful.")
@@ -293,11 +327,16 @@ def upload_parsed_statement(
 
     # --- FIX STEP 2: Create the Parent Statement Record First ---
     meta = parsed_result["meta"]
+    # A bank-feed pull (file_type="feed") has no file; tag its provenance and skip the
+    # synthetic path. Uploads keep the existing defaults unchanged.
+    is_feed = file_type == "feed"
     statement_payload = {
         "statement_id": statement_id,
         "account_id": account_id,
-        "file_type": "csv",
-        "file_path": f"/{statement_id}.csv", # giving it a clean path just in case
+        "file_type": file_type,
+        # feeds have no file — a synthetic URI keeps the NOT NULL column honest about origin.
+        "file_path": f"finverse://{statement_id}" if is_feed else f"/{statement_id}.csv",
+        "source": "bankfeed" if is_feed else "upload",
         "period_start": meta["date_range"]["from"],
         "period_end": meta["date_range"]["to"],
     }

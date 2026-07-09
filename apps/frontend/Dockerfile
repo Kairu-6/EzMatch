@@ -3,7 +3,9 @@
 FROM node:20-slim AS build
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+# npm install (not `npm ci`) because the committed lockfile is out of sync with
+# package.json (lucide-react bumped). install reconciles it; ci would refuse.
+RUN npm install
 COPY . .
 ARG NEXT_PUBLIC_SUPABASE_URL
 ARG NEXT_PUBLIC_SUPABASE_ANON_KEY

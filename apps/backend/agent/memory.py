@@ -73,6 +73,12 @@ class AgentMemory:
             budget -= size
             kept.append(msg)
         kept.reverse()
+        # A trim can cut right after a tool call, leaving a role="tool" message
+        # whose owning assistant tool_calls message got dropped — the API 400s on
+        # an orphaned tool result. Reverse-walk means only a LEADING orphan is
+        # possible, so drop those and nothing else.
+        while kept and kept[0].get("role") == "tool":
+            kept.pop(0)
         return head + kept
 
     # ── episodic memory (durable trace) ───────────────────────────
@@ -114,9 +120,10 @@ def load_learned(db: Client, sme_id: str) -> dict:
     vendor / bank-description / variance shapes humans keep validating.
 
     Negative signal — `reconciliation_log` rows with `event_type='match_rejected'`:
-    pairings the deterministic gate killed (there is no `rejected` status in
-    reconciliation_match — a rejected proposal is never written). These become a
-    small avoid-list.
+    pairings the deterministic gate killed mid-run, plus pairings a human rejected
+    from the audit/history UI. These become a small avoid-list — but one that skips
+    any pairing that now has a live accepted match, so re-accepting supersedes an
+    earlier rejection (see _load_blocklist).
 
     Returns {"summary", "exemplars", "blocklist"}; only `summary` is injected into
     the system prompt today. On a fresh workspace (or any error) it returns the
@@ -189,12 +196,27 @@ def _load_positives(db: Client, job_ids: list[str]) -> list[dict]:
 
 
 def _load_blocklist(db: Client, job_ids: list[str]) -> list[dict]:
-    """Recent gate-rejected pairings, deduped, as a small avoid-list."""
+    """Recent rejected pairings, deduped, as a small avoid-list. Skips any pairing
+    that currently has a live auto/manual match — a rejection that has since been
+    superseded by an accepted match is stale and must not linger as a prior (this
+    is what keeps repeated reject→re-run→accept cycles from leaving contradictions)."""
     rows = (db.table("reconciliation_log")
               .select("metadata, created_at")
               .in_("job_id", job_ids).eq("event_type", "match_rejected")
               .order("created_at", desc=True)
               .limit(LEARNED_SCAN_LIMIT).execute().data) or []
+
+    # Pairings (invoice_number, txn-prefix) currently accepted — used to suppress
+    # stale rejections of the same pairing.
+    accepted = (db.table("reconciliation_match")
+                  .select("transaction_id, invoice(invoice_number)")
+                  .in_("job_id", job_ids).in_("match_status", ["auto", "manual"])
+                  .limit(LEARNED_SCAN_LIMIT).execute().data) or []
+    accepted_keys = {
+        (((a.get("invoice") or {}).get("invoice_number") or "?"),
+         (a.get("transaction_id") or "")[:8])
+        for a in accepted
+    }
 
     seen: set[tuple] = set()
     blocklist: list[dict] = []
@@ -203,7 +225,7 @@ def _load_blocklist(db: Client, job_ids: list[str]) -> list[dict]:
         inv_no = meta.get("invoice_number") or "?"
         txn = (meta.get("transaction_id") or "")[:8]
         key = (inv_no, txn)
-        if key in seen:
+        if key in seen or key in accepted_keys:
             continue
         seen.add(key)
         blocklist.append({
