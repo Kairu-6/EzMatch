@@ -1,11 +1,11 @@
-# CLAUDE.md — TreasuryFlow AI
+# CLAUDE.md — ezMatch
 
 Handoff/onboarding doc for this repo. Read this first. See also `PRODUCT.md`,
 `DESIGN.md`, and the per-session memory in
 `.claude/projects/.../memory/` (db_state_rls.md is the most detailed).
 
 ## What this is
-**TreasuryFlow AI** — automated cross-border reconciliation for a Malaysian SME.
+**ezMatch** — automated cross-border reconciliation for a Malaysian SME.
 Upload bank statements (CSV/XLSX), invoices (PDF/image), and payment proofs
 (PDF/image); an AI engine matches transactions ↔ invoices across currencies
 (with FX), surfacing exceptions for review. Brand/lane: institutional trust

@@ -78,14 +78,14 @@ export default function SignUpPage() {
         <div className="relative z-10 flex flex-col justify-between h-full">
         <Link
           href="/"
-          aria-label="TreasuryFlow AI home"
+          aria-label="ezMatch home"
           className="flex items-center gap-2.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-accent w-fit"
         >
           <span className="flex items-center justify-center w-8 h-8 rounded-md bg-accent text-accent-fg">
             <Landmark className="w-4.5 h-4.5" />
           </span>
           <span className="font-semibold text-ink tracking-tight">
-            TreasuryFlow <span className="text-ink-muted font-normal">AI</span>
+            ezMatch
           </span>
         </Link>
 
@@ -114,13 +114,13 @@ export default function SignUpPage() {
         <div className="w-full max-w-sm">
           <Link
             href="/"
-            aria-label="TreasuryFlow AI home"
+            aria-label="ezMatch home"
             className="lg:hidden flex items-center gap-2.5 mb-8 w-fit rounded-md outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             <span className="flex items-center justify-center w-8 h-8 rounded-md bg-accent text-accent-fg">
               <Landmark className="w-4.5 h-4.5" />
             </span>
-            <span className="font-semibold text-ink">TreasuryFlow AI</span>
+            <span className="font-semibold text-ink">ezMatch</span>
           </Link>
 
           {success ? (

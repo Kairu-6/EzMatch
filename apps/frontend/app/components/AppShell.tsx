@@ -176,7 +176,7 @@ function TopNav() {
               <Landmark className="w-4.5 h-4.5" />
             </span>
             <span className="font-semibold text-ink tracking-tight hidden sm:inline">
-              TreasuryFlow <span className="text-ink-muted font-normal">AI</span>
+              ezMatch
             </span>
           </Link>
 

@@ -117,7 +117,7 @@ function MyInvoisCard() {
               />
               <p className="text-sm text-ink-muted">
                 {isReal
-                  ? "Register TreasuryFlow as an ERP in your MyInvois portal (Taxpayer Profile → Register ERP) to get these."
+                  ? "Register ezMatch as an ERP in your MyInvois portal (Taxpayer Profile → Register ERP) to get these."
                   : "Mock uses sample e-Invoices so you can try the flow without real credentials."}
               </p>
             </div>

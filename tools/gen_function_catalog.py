@@ -10,7 +10,7 @@ import json
 import os
 import re
 
-REPO = r"C:\Users\user\Desktop\kai's\feldilmi"
+REPO = r"C:\Users\user\Desktop\kai's\ezmatch"
 BACKEND = os.path.join(REPO, "apps", "backend")
 
 FILES = [

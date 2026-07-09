@@ -1,1 +1,1 @@
-"""TreasuryFlow agentic reconciliation package."""
+"""ezMatch agentic reconciliation package."""

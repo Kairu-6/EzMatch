@@ -12,7 +12,7 @@ The job to be done: **close the loop between three messy sources — bank statem
 
 ## Product Purpose
 
-TreasuryFlow AI is an automated reconciliation platform. It ingests bank statements (CSV/XLSX), invoices (PDF/image), and payment proofs (PDF/image), parses them, and uses an AI matching engine to reconcile transactions to invoices across currencies — accounting for FX. Success is: the user uploads their documents, runs reconciliation, and trusts the result enough to act on it — matched items cleared, a short, legible list of exceptions to resolve, and an audit trail they could show an accountant or auditor.
+ezMatch is an automated reconciliation platform. It ingests bank statements (CSV/XLSX), invoices (PDF/image), and payment proofs (PDF/image), parses them, and uses an AI matching engine to reconcile transactions to invoices across currencies — accounting for FX. Success is: the user uploads their documents, runs reconciliation, and trusts the result enough to act on it — matched items cleared, a short, legible list of exceptions to resolve, and an audit trail they could show an accountant or auditor.
 
 It exists because cross-border reconciliation for SMEs is manual, error-prone, and slow, and because FX differences make naive matching fail.
 

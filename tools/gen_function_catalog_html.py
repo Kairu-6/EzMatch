@@ -227,7 +227,7 @@ summary_html = "\n".join(
 cover = f"""
 <section class="cover">
   <div class="cover-inner">
-    <p class="eyebrow">TreasuryFlow AI &mdash; internal reference</p>
+    <p class="eyebrow">ezMatch &mdash; internal reference</p>
     <h1>Function Catalog</h1>
     <p class="cover-date">Generated {DATE}</p>
     <p class="cover-sub">A one-page-per-file index of every function in the codebase: what it is,
@@ -380,7 +380,7 @@ td.num,th.num{text-align:right;}
 
 full_html = f"""<!doctype html>
 <meta charset="utf-8">
-<title>TreasuryFlow AI — Function Catalog</title>
+<title>ezMatch — Function Catalog</title>
 <style>{CSS}</style>
 {BODY}
 """
