@@ -44,7 +44,11 @@ type SourceRow = {
   credit: boolean;
 };
 
-type TxRow = SourceRow & { creditAmount: number; accountId: string | null };
+type TxRow = SourceRow & {
+  creditAmount: number;
+  accountId: string | null;
+  currency: string;
+};
 
 type Account = {
   account_id: string;
@@ -237,6 +241,7 @@ export function DashboardPage() {
         credit: r.credit_amount != null,
         creditAmount: r.credit_amount ?? 0,
         accountId: st?.account_id ?? null,
+        currency: r.currency_code ?? "MYR",
       };
     });
     setAllTx(tx);
@@ -273,10 +278,10 @@ export function DashboardPage() {
       ? "MYR"
       : accounts.find((a) => a.account_id === selectedAccount)?.currency_code ??
         "MYR";
-  const fmt = (n: number) =>
+  const fmt = (n: number, currency: string = activeCurrency) =>
     new Intl.NumberFormat("en-MY", {
       style: "currency",
-      currency: activeCurrency,
+      currency,
       maximumFractionDigits: 0,
     }).format(n);
 
@@ -599,7 +604,7 @@ export function DashboardPage() {
                         }`}
                       >
                         {r.credit ? "+" : "−"}
-                        {fmt(r.amount)}
+                        {fmt(r.amount, r.currency)}
                       </Td>
                     </Tr>
                   ))}
