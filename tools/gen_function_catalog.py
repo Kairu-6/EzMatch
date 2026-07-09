@@ -10,7 +10,8 @@ import json
 import os
 import re
 
-REPO = r"C:\Users\user\Desktop\kai's\ezmatch"
+# Repo root = parent of this tools/ dir (robust to the folder name / clone location).
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BACKEND = os.path.join(REPO, "apps", "backend")
 
 FILES = [
@@ -18,7 +19,7 @@ FILES = [
     "data_contracts.py", "statement_parser.py", "invoice_parser.py",
     "proof_parser.py", "parser_llm.py", "myinvois_client.py",
     "accounting_client.py", "bank_feed_client.py", "bankfeed_state.py",
-    "seed_data.py", "seed_demo.py", "seed_files.py",
+    "seed_data.py", "seed_demo.py", "seed_files.py", "eval_recon.py",
     "test_reference_match.py", "test_myinvois_map.py", "test_accounting_map.py",
     os.path.join("agent", "runner.py"), os.path.join("agent", "tools.py"),
     os.path.join("agent", "llm.py"), os.path.join("agent", "memory.py"),
