@@ -129,8 +129,18 @@ def _merge_debit_credit(df: pd.DataFrame) -> pd.DataFrame:
 
     if debit_col and credit_col:
         logger.info("Split debit/credit columns detected — merging into signed 'amount'.")
-        debit  = df[debit_col].apply(lambda x: -abs(_clean_amount(x)) if pd.notna(x) and str(x).strip() else 0.0)
-        credit = df[credit_col].apply(lambda x: abs(_clean_amount(x)) if pd.notna(x) and str(x).strip() else 0.0)
+        # Placeholder cells ("-", "N/A", blank) aren't numbers — treat as 0.0 instead
+        # of letting _clean_amount's ValueError abort the whole upload.
+        def _cell(x: Any) -> float:
+            if pd.isna(x) or not str(x).strip():
+                return 0.0
+            try:
+                return _clean_amount(x)
+            except ValueError:
+                return 0.0
+
+        debit  = df[debit_col].apply(lambda x: -abs(_cell(x)))
+        credit = df[credit_col].apply(lambda x: abs(_cell(x)))
         df["amount"] = debit + credit
         df.drop(columns=[debit_col, credit_col], inplace=True)
 
