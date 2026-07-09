@@ -124,3 +124,6 @@ desktop.ini
 tools/backend_functions.json
 tools/frontend_functions.json
 tools/catalog.html
+
+# generated data
+test_files/
