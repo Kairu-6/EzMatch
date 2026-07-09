@@ -90,11 +90,25 @@ existing `statement_parser.upload_parsed_statement` seam, then reconciles unchan
   default) returns static fixtures AND a `link_url` that loops straight back to our own callback,
   so the whole consent→sync→recon path is demoable offline; set `FINVERSE_ENV=sandbox`/`prod` for
   the real API (no code change). Self-check: run `bank_feed_client.py` / `bankfeed_state.py` directly.
+- **✅ FULLY LIVE & WORKING on prod (2026-07-08)** — deployed on the EC2 box at
+  `https://ezmatch.my` (see [[ec2-deploy]]). Real testbank consent → callback → sync **imported
+  126 transactions** (1 BTC row skipped by the currency filter). Full leg trace confirmed against
+  `api.prod.finverse.net`.
 - **ONE API host for test AND live: `https://api.prod.finverse.net`** — there is NO `api.sandbox`
   host (it fails DNS). "sandbox vs prod" is decided by which CREDENTIALS you use, not the host, so
-  `FINVERSE_ENV` is effectively mock-vs-real. **Verified live (2026-07-08):** customer-token mint
-  ✅ and `/link/token` param validation ✅ against prod with the real creds; `state` is capped at
-  100 chars by Finverse (we send a compact `sme_id.epoch.sig` ~80-char HMAC token).
+  `FINVERSE_ENV` is effectively mock-vs-real. `state` is capped at **100 chars** by Finverse (we send
+  a compact `sme_id.epoch.sig` ~80-char HMAC token — a longer base64+full-HMAC token gets rejected).
+- **Test-app tier → link the `testbank` institution for TEST DATA.** New Finverse apps are "Test"
+  apps: they can only link Finverse's **testbank** (appears in our `countries=["MYS"]` picker; its
+  countries include MYS) — real Maybank/CIMB/etc. show in the picker but need **Live usage** (new
+  "Live" team in the portal + email support@finverse.com + commercial docs; free quota-limited live
+  testing on request). testbank returns **multi-currency incl BTC**, so sync **filters out any
+  currency not in the `currency` table** (else `bank_transaction.currency_code` FK fails the whole
+  batch); account auto-create likewise picks a supported-currency account.
+- **`exchange_code` gotcha:** accounts come from a SEPARATE `GET /accounts` (fields
+  `account_currency`/`account_name`/`balance{}`), NOT from `/login_identity` (which carries the
+  institution + per-product retrieval status — poll `login_identity.product_status.accounts.status
+  == "SUCCESS"`). Login-identity token lives ~1h → re-Connect if a later sync 401s.
 - **State/tenant routing:** `apps/backend/bankfeed_state.py` — HMAC-signed, 10-min `state` carries
   the sme_id across the JWT-less redirect (also CSRF). The callback writes with service_role using
   the sme_id decoded from the verified state, never a client value.
@@ -107,15 +121,17 @@ existing `statement_parser.upload_parsed_statement` seam, then reconciles unchan
   No per-tenant credential table. `# ponytail: login-identity token plaintext under RLS —
   prototype-grade, same ceiling as myinvois_credential.` `upload_parsed_statement` gained a
   `file_type` param (default `csv`, so uploads are unchanged).
-- **Frontend:** `/settings` **BankFeedCard** (Connect button + linked-bank list + Disconnect; NO
-  creds fields) — "Connect" opens the returned `link_url`. `/uploads` statements tab: **"Sync bank
-  feed"** button + a `?linked=1` return toast. AppShell/AuthContext unchanged (callback is the
-  backend, which 302s back to the already-protected `/uploads`).
-- **⚠️ Prod creds were shared in chat once — ROTATE the client secret in `dashboard.finverse.com`
-  before any real pull.** `customer_app_id` is response-only, not an auth input.
-- **To go live (dashboard steps, not code):** rotate secret → set `FINVERSE_CLIENT_ID/SECRET` +
-  `FINVERSE_ENV=sandbox|prod` + `FINVERSE_REDIRECT_URI` (HTTPS, tunnel the backend) → register that
-  redirect_uri in the Finverse dashboard → restart. First smoke test: curl `POST /auth/customer/token`.
+- **Frontend:** connect on `/settings` **BankFeedCard** (Connect button + linked-bank list +
+  Disconnect; NO creds fields), sync on `/uploads` **"Sync bank feed"** button. The callback 302s
+  the user **back to `/settings?linked=1|0`** (where they started — NOT /uploads) and settings toasts
+  the outcome. **Every callback outcome MUST redirect** (it's a browser navigation) — never return
+  JSON, or the user sees a raw error page on the api subdomain. AppShell/AuthContext unchanged.
+- **⚠️ Prod creds were shared in chat once — ROTATE the client secret in `dashboard.finverse.com`.**
+  `customer_app_id` is response-only, not an auth input.
+- **Live config (done on the box):** `FINVERSE_ENV=prod`, `FINVERSE_CLIENT_ID/SECRET`,
+  `FINVERSE_REDIRECT_URI=https://api.ezmatch.my/api/bankfeed/callback` (registered in the Finverse
+  dashboard — required, else `/link/token` returns "Invalid redirect_uri"), `FRONTEND_URL=https://ezmatch.my`,
+  `BANKFEED_STATE_SECRET`. Smoke test: `curl POST /auth/customer/token`.
 - **Follow-ups (not built):** webhooks/auto-refresh (`/login_identity/refresh`, `/auth/token/refresh`),
   consent-expiry relink, per-account split (one login → first account today), statements/PDF pull,
   pgcrypto token encryption. Real MY-bank product entitlements + redirect_uri whitelist are only
