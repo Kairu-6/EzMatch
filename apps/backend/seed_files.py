@@ -108,6 +108,38 @@ def _write_statement(stmt: dict, path: str) -> None:
                 w.writerow([r["date"], r["description"], f"{r['credit']:.2f}"])
 
 
+# ── invalid files (failure-path coverage for the upload validators) ─────────────
+def _write_invalid_files(root: str) -> list[dict]:
+    """Deliberately broken uploads so the demo can show honest parse-failure states.
+    Returns manifest entries documenting the expected rejection for each."""
+    d = os.path.join(root, "_invalid")
+    os.makedirs(d, exist_ok=True)
+    # Not a real PDF (PyMuPDF can't open it) — upload as an invoice/proof.
+    with open(os.path.join(d, "corrupt.pdf"), "wb") as f:
+        f.write(b"%PDF-1.4 this is not actually a valid pdf body \x00\x01\x02 garbage")
+    # Empty statement (no rows).
+    open(os.path.join(d, "empty.csv"), "w", encoding="utf-8").close()
+    # Headers the statement parser can't map to date/description/amount.
+    with open(os.path.join(d, "bad_schema.csv"), "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["foo", "bar", "baz"])
+        w.writerow(["1", "2", "3"])
+        w.writerow(["4", "5", "6"])
+    # Unsupported file type for any uploader.
+    with open(os.path.join(d, "unsupported.txt"), "w", encoding="utf-8") as f:
+        f.write("just some plain text, not a statement/invoice/proof")
+    return [
+        {"file": "_invalid/corrupt.pdf", "upload_as": "invoice or payment_proof",
+         "expected": "parse fails → red 'Failed' pill + error_message (no readable text)"},
+        {"file": "_invalid/empty.csv", "upload_as": "bank statement",
+         "expected": "parse yields zero transactions → rejected / empty statement"},
+        {"file": "_invalid/bad_schema.csv", "upload_as": "bank statement",
+         "expected": "no mappable date/amount columns → parse error"},
+        {"file": "_invalid/unsupported.txt", "upload_as": "any",
+         "expected": "unsupported file type → upload rejected"},
+    ]
+
+
 # ── manifest ───────────────────────────────────────────────────────
 def _acct_label(accounts: list[dict], account_id: str) -> dict:
     a = next((x for x in accounts if x["account_id"] == account_id), accounts[0])
@@ -213,41 +245,69 @@ def main() -> None:
             },
         })
 
+    invalid_entries = _write_invalid_files(TEST_FILES)
+
     with open(os.path.join(TEST_FILES, "sme_infos"), "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
 
+    # Ground-truth baseline for eval_recon.py — expected correct/false outcome per
+    # pre-seeded invoice, keyed on the deterministic seed ids that land in the DB.
+    exp = data["expectations"]
+    tiers = {}
+    for e in exp:
+        tiers[e["tier"]] = tiers.get(e["tier"], 0) + 1
+    with open(os.path.join(TEST_FILES, "expected_reconciliation.json"), "w", encoding="utf-8") as f:
+        json.dump({
+            "sme_id": data["datasets"][0]["sme"]["sme_id"],
+            "note": "Ground truth for the pre-seeded set. Run reconciliation for this sme, "
+                    "then `python eval_recon.py` scores actual matches against expected_* here. "
+                    "Accuracy is deliberately < 100% (see the D/E tiers).",
+            "time_model": data["time_model"],
+            "tier_counts": dict(sorted(tiers.items())),
+            "expectations": exp,
+        }, f, indent=2, ensure_ascii=False)
+
     with open(os.path.join(TEST_FILES, "README.md"), "w", encoding="utf-8") as f:
-        f.write(_readme(data, counts))
+        f.write(_readme(data, counts, invalid_entries))
 
-    print(f"Wrote test_files for {len(manifest)} tenants -> {TEST_FILES}")
+    print(f"Wrote test_files for {len(manifest)} tenant(s) -> {TEST_FILES}")
     print(f"  {counts['statements']} statements · {counts['invoices']} invoices · "
-          f"{counts['proofs']} proofs + sme_infos + README.md")
+          f"{counts['proofs']} proofs · {len(invalid_entries)} invalid files")
+    print(f"  + sme_infos + expected_reconciliation.json ({len(exp)} scored invoices) + README.md")
 
 
-def _readme(data, counts) -> str:
+def _readme(data, counts, invalid_entries) -> str:
+    s = data["datasets"][0]["sme"]
     lines = [
         "# test_files — uploadable demo documents",
         "",
-        "These are the **file half** of the demo dataset: documents that are NOT pre-seeded",
+        "These are the **file quarter** of the demo dataset: documents that are NOT pre-seeded",
         "in the database. Upload them through the app to exercise the real parse pipeline,",
-        "then run reconciliation. The pre-seeded half (live reconcile/verify/anomaly demo +",
-        "a historical reconciled job per tenant) is loaded by `apps/backend/seed_demo.py`.",
+        "then run reconciliation. The pre-seeded bulk (live reconcile/verify/anomaly demo +",
+        "a historical reconciled job) is loaded by `apps/backend/seed_demo.py`.",
         "",
         "Regenerate everything: run `seed_demo.py` (DB) then `seed_files.py` (these files).",
         "",
-        "`sme_infos` (JSON) is the authoritative manifest: per-tenant logins, bank accounts,",
-        "what is pre-seeded vs file-only, and each upload's expected reconciliation.",
+        "`sme_infos` (JSON) is the authoritative manifest: login, bank accounts, what is",
+        "pre-seeded vs file-only, and each upload's expected reconciliation.",
+        "`expected_reconciliation.json` is the ground-truth baseline (per pre-seeded invoice)",
+        "that `eval_recon.py` scores a real reconcile run against.",
         "",
-        f"Demo password (all four logins): `{data['password']}`",
+        f"Demo login: **{s['email']}** · password `{data['password']}`",
         "",
-        "## Tenants",
+        f"## Tenant: {s['company_name']} (`{s['base_ccy']}`)",
+        "",
+        f"Folder `{s['slug']}/` — {counts['statements']} statements · {counts['invoices']} invoices · "
+        f"{counts['proofs']} proofs.",
+        "",
+        "## Invalid files (`_invalid/`) — failure-path coverage",
+        "",
+        "Upload these to show honest parse-failure/validation states:",
         "",
     ]
-    for ds in data["datasets"]:
-        s = ds["sme"]
-        lines.append(f"- **{s['company_name']}** (`{s['base_ccy']}`) — {s['email']} — folder `{s['slug']}/`")
-    lines += ["", f"Totals: {counts['statements']} statements · {counts['invoices']} invoices · "
-              f"{counts['proofs']} proofs across {len(data['datasets'])} tenants.", ""]
+    for e in invalid_entries:
+        lines.append(f"- `{e['file']}` (upload as {e['upload_as']}) → {e['expected']}")
+    lines.append("")
     return "\n".join(lines)
 
 

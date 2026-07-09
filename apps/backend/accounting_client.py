@@ -72,13 +72,20 @@ def _inv(doc_no, debtor, currency, total, doc_date, due):
 
 _MOCK_INVOICES = {
     "autocount": [
-        _inv("AC-INV-0001", "Penang Foods Sdn Bhd",     "MYR", 6656.00, "2026-06-12", "2026-07-12"),
-        _inv("AC-INV-0002", "Crescent Trading Sdn Bhd", "MYR", 7600.00, "2026-06-10", "2026-07-10"),
-        _inv("AC-INV-0003", "Selat Shipping Sdn Bhd",   "MYR", 5400.00, "2026-06-11", "2026-07-11"),
-        _inv("AC-INV-0004", "Contoso Trading LLC",      "USD", 2329.77, "2026-06-14", "2026-07-14"),
+        _inv("AC-INV-0001", "Penang Foods Sdn Bhd",       "MYR", 6656.00, "2026-06-12", "2026-07-12"),
+        _inv("AC-INV-0002", "Crescent Trading Sdn Bhd",   "MYR", 7600.00, "2026-06-10", "2026-07-10"),
+        _inv("AC-INV-0003", "Selat Shipping Sdn Bhd",     "MYR", 5400.00, "2026-06-11", "2026-07-11"),
+        _inv("AC-INV-0004", "Contoso Trading LLC",        "USD", 2329.77, "2026-06-14", "2026-07-14"),
+        _inv("AC-INV-0005", "Rembau Rubber Sdn Bhd",      "MYR", 9120.00, "2026-06-15", "2026-07-15"),
+        _inv("AC-INV-0006", "Kuantan Ceramics",           "MYR", 4380.00, "2026-06-16", "2026-07-16"),
+        _inv("AC-INV-0007", "Bentong Ginger Traders",     "MYR", 3175.00, "2026-06-17", "2026-07-17"),
+        _inv("AC-INV-0008", "Muar Furniture Bhd",         "MYR", 8890.00, "2026-06-18", "2026-07-18"),
     ],
     "sql": [
-        _inv("SQL-INV-0001", "Nordwind GmbH",          "EUR", 2603.03, "2026-06-14", "2026-07-14"),
-        _inv("SQL-INV-0002", "Selangor Foods Sdn Bhd", "MYR", 5289.40, "2026-06-13", "2026-07-13"),
+        _inv("SQL-INV-0001", "Nordwind GmbH",             "EUR", 2603.03, "2026-06-14", "2026-07-14"),
+        _inv("SQL-INV-0002", "Selangor Foods Sdn Bhd",    "MYR", 5289.40, "2026-06-13", "2026-07-13"),
+        _inv("SQL-INV-0003", "Alor Setar Textiles",       "MYR", 6210.00, "2026-06-14", "2026-07-14"),
+        _inv("SQL-INV-0004", "Sungai Petani Steel",       "MYR", 4750.00, "2026-06-19", "2026-07-19"),
+        _inv("SQL-INV-0005", "Taiping Tea Company",       "MYR", 3990.00, "2026-06-20", "2026-07-20"),
     ],
 }

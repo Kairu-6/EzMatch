@@ -1,24 +1,24 @@
 """
-seed_demo.py — full multi-tenant idempotent reseed
-===================================================
-Rewrites the database into a clean, demoable, MULTI-TENANT state: four SMEs, each
-with three bank accounts, a completed historical reconciliation job, a pre-seeded
-"current" set ready to reconcile, and payment proofs — covering every Phase-A/B
-code path and edge case (see seed_data.py).
+seed_demo.py — single-tenant idempotent reseed
+==============================================
+Rewrites the database into a clean, demoable, SINGLE-TENANT state (WZB Group): 2 bank
+accounts, mock connector state (Finverse consent + AutoCount/SQL/MyInvois creds), a
+completed historical reconciliation job, and a pre-seeded "current" set (~75 pending
+invoices across sources + ~100 transactions + ~75 proofs) ready to reconcile — covering
+every code path and difficulty tier (see seed_data.py).
 
 It is **idempotent**: every id is derived deterministically (uuid5), so re-running
 replaces in place. It is also **destructive by design** — it wipes ALL tenant data
-and prunes stray Supabase Auth users, leaving exactly the four demo logins.
+and prunes stray Supabase Auth users, leaving exactly the one demo login.
 
-The "other half" of the documents (≈ half the invoices/proofs/statements) is NOT
-seeded here — those ship as uploadable files under test_files/ (run seed_files.py).
+The ~quarter of documents delivered as uploadable files is NOT seeded here — those ship
+under test_files/ (run seed_files.py). The ground-truth expectations for the pre-seeded
+set land in test_files/expected_reconciliation.json (scored by eval_recon.py).
 
 Run (backend venv):
   cd apps/backend && PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe seed_demo.py
 
-Demo logins (all share the password in seed_data.DEMO_PASSWORD):
-  finance@wzbgroup.my · ops@nusantara-logistics.my ·
-  finance@selangortextiles.my · accounts@pearldelta.sg
+Demo login (password in seed_data.DEMO_PASSWORD): finance@wzbgroup.my
 """
 import os
 
@@ -40,6 +40,9 @@ _WIPE = [
     ("payment_proof", "proof_id", "uuid"),
     ("bank_transaction", "transaction_id", "text"),
     ("bank_statement", "statement_id", "uuid"),
+    ("bank_feed_link", "link_id", "uuid"),
+    ("accounting_credential", "sme_id", "uuid"),
+    ("myinvois_credential", "sme_id", "uuid"),
     ("invoice", "invoice_id", "uuid"),
     ("bank_account", "account_id", "uuid"),
     ("sme", "sme_id", "uuid"),
@@ -104,11 +107,19 @@ def main() -> None:
     print("== Reseeding (idempotent, destructive) ==")
     wipe_all()
 
-    # FX cache (upsert — exchange_rate is global, never wiped).
+    # FX cache (upsert — exchange_rate is global, never wiped). Make the SEED rate
+    # authoritative for its pair+date: get_rate() selects a cached row by
+    # (from,to,effective_at) with NO api_source filter (forex_api.py:52-56), so a stale
+    # Frankfurter row for the same date could shadow the seed rate — shifting match
+    # variance and making the eval baseline non-reproducible. Drop conflicting non-seed
+    # rows first so the recon always values seeded invoices at the seeded rate.
     for r in data["fx"]:
+        db.table("exchange_rate").delete() \
+          .eq("from_currency", r["from_currency"]).eq("to_currency", r["to_currency"]) \
+          .eq("effective_at", r["effective_at"]).neq("api_source", "seed").execute()
         db.table("exchange_rate").upsert(
             r, on_conflict="from_currency,to_currency,effective_at,api_source").execute()
-    print(f"Upserted {len(data['fx'])} FX rates.")
+    print(f"Upserted {len(data['fx'])} FX rates (seed-authoritative).")
 
     # Provision auth users AFTER smes are inserted so the handle_new_user trigger
     # claims our unclaimed rows — but we insert smes with user_id NULL first.
@@ -144,6 +155,11 @@ def main() -> None:
         db.table("bank_account").insert(ds["accounts"]).execute()
         totals["accounts"] += len(ds["accounts"])
 
+        # ── connector state so Connect/Sync buttons are pre-configured (mock) ──
+        db.table("bank_feed_link").insert(ds["bank_feed_link"]).execute()
+        db.table("accounting_credential").insert(ds["credentials"]["accounting"]).execute()
+        db.table("myinvois_credential").insert(ds["credentials"]["myinvois"]).execute()
+
         # ── historical job (B.1 manual exemplars + B.3 baselines) ──
         h = ds["history"]
         db.table("bank_statement").insert(h["statement"]).execute()
@@ -178,7 +194,7 @@ def main() -> None:
         print(f"  seeded {s['company_name']}")
 
     print("\n== Done ==")
-    print(f"  4 SMEs · {totals['accounts']} accounts · {totals['statements']} statements · "
+    print(f"  {len(datasets)} SME · {totals['accounts']} accounts · {totals['statements']} statements · "
           f"{totals['transactions']} transactions")
     print(f"  {totals['invoices']} invoices · {totals['proofs']} proofs · "
           f"{totals['matches']} historical matches")

@@ -164,11 +164,11 @@ existing `statement_parser.upload_parsed_statement` seam, then reconciles unchan
   token (no `{sme_id}` path param). Backend still uses service_role (bypasses RLS by design).
 - **DB:** `current_sme_id()` helper + `handle_new_user()` trigger (claims an unclaimed sme by email,
   else inserts). Policies: direct sme_id, FK-chain EXISTS, global read-only for exchange_rate/currency.
-- **Demo logins (4 tenants, all password `TreasuryFlow#2026`, email pre-confirmed):**
-  `finance@wzbgroup.my` (WZB, sme `111e4567-…`), `ops@nusantara-logistics.my` (sme `2222…`),
-  `finance@selangortextiles.my` (sme `3333…`), `accounts@pearldelta.sg` (sme `4444…`, SGD base).
-  Provisioned by `seed_demo.py`; re-running rotates the password back to this.
-- `test_files/sme_infos` (JSON) is the manifest/ledger of who owns what + the logins; new SMEs
+- **Demo login (SINGLE tenant since 2026-07-09, password `TreasuryFlow#2026`, email
+  pre-confirmed):** `finance@wzbgroup.my` (WZB Group, sme `111e4567-…174111`, MYR base).
+  Provisioned by `seed_demo.py`, which prunes every other Auth user; re-running rotates the
+  password back to this. (The old 4-tenant set was collapsed to one for the final demo.)
+- `test_files/sme_infos` (JSON) is the manifest/ledger of who owns what + the login; new SMEs
   also self-onboard via signup.
 
 ### Post-auth fixes (also 2026-06-28)
@@ -181,8 +181,8 @@ existing `statement_parser.upload_parsed_statement` seam, then reconciles unchan
   same statement was re-uploaded, silently reassigning one tenant's transactions to another.
 - **Dashboard "Funds reconciled"** now sums `reconciliation_match` (converted_amount for All-accounts
   MYR; transaction_amount per account), not all bank credits.
-- (Historical note) earlier ad-hoc tenants (Kaikaruu + junk signups) were removed by the
-  2026-06-28 multi-tenant reseed; the DB now holds exactly the 4 demo tenants above.
+- (Historical note) the 2026-06-28 reseed held 4 demo tenants; the 2026-07-09 rebuild
+  collapsed that to the SINGLE WZB tenant above (see the Seed / reset section).
 
 ## Frontend routes (AppShell nav = 3 items)
 - `/` — Reconciliation **dashboard**: "Documents" readiness panel + "Go to uploads";
@@ -203,14 +203,29 @@ existing `statement_parser.upload_parsed_statement` seam, then reconciles unchan
 - `POST /api/reconcile/{sme_id}` (202, background) + `GET /api/job-status/{sme_id}`.
 - `GET /health`.
 
-## Reconciliation flow (`orchestrator.py`)
-Fetch unmatched invoices (status in pending/unmatched, by sme_id) + unmatched
-transactions (joined sme via statement→account, within `RECON_LOOKBACK_DAYS`) +
-completed proofs → resolve FX (cache→Frankfurter) → build prompt → **Morpheus**
-returns match proposals w/ confidence → write `reconciliation_match`
-(`auto` if confidence ≥ 0.75 else `pending_review`), flip `bank_transaction.is_matched`,
-set invoice status. `_fetch_invoices` skips rows that fail schema validation
-(failed/half-parsed) so they don't crash the job.
+## Reconciliation flow
+**Legacy (`orchestrator.py`, `USE_AGENT=false`):** fetch unmatched invoices (pending/unmatched,
+by sme_id) + unmatched transactions (joined sme via statement→account, within
+`RECON_LOOKBACK_DAYS`) + completed proofs → resolve FX (cache→Frankfurter) → one **Morpheus**
+prompt → match proposals w/ confidence → write `reconciliation_match` (`auto` if ≥0.75 else
+`pending_review`), flip `is_matched`, set invoice status. Skips schema-invalid invoices.
+
+**Agent (`agent/runner.py`, `USE_AGENT=true` — DEFAULT):** deterministic reference pre-pass
+first (exact DuitNow/FPX key → auto through the gate), then the unreferenced remainder is
+**reconciled in BATCHES** (`AGENT_BATCH_SIZE`, default 12). Each batch is a short, focused
+sub-loop with a **`find_candidates(invoice_id)`** retrieval tool (deterministic shortlist by
+amount+date+name — reuses `verifier._tokens`) instead of a whole-ledger dump — this is what
+lets it scale (the old single loop overflowed the 24k working-memory budget on ~50+ rows and
+re-listed forever). `propose_match` is the only write tool; the deterministic **gate** sets
+`auto`/`pending_review`/reject. After all batches, `verifier` (downgrades risky auto-commits:
+no-proof ≥50k, weak name link, txn reuse) and `anomaly` (duplicate/beneficiary-mismatch/
+bank-detail-change/outlier) run ONCE over the job with full visibility. Falls back to legacy
+if the model is unreachable at the initial probe. **Batches run CONCURRENTLY**
+(`AGENT_BATCH_CONCURRENCY`, default 4) — independent sub-loops, ~3–4× faster wall-clock; the
+only contended state is `consumed_txns`, reserved atomically under a lock in `propose_match`
+(invoices are disjoint per batch). Recon time ≈ (LLM-path invoices ÷ concurrency) × ~11s.
+Stress-test volume via `SEED_LLM_TARGET` (seed_data.py, default 38 ≈ 7-min demo; 100 for a
+~5-min-parallel / ~18-min-serial stress run) and `eval_recon.py` reports the wall-clock.
 
 ## DB schema (key tables + FK chains)
 `sme` → `bank_account`(sme_id) → `bank_statement`(account_id) →
@@ -220,29 +235,39 @@ invoice_id). `exchange_rate` (FX cache). `reconciliation_job`(sme_id) /
 `reconciliation_log`(job_id) / `recommendation`(sme_id, job_id).
 Full column lists in memory `db_state_rls.md`.
 
-## Seed / reset (multi-tenant, idempotent — 2026-06-28)
-Three modules in `apps/backend/`, all-deterministic ids (uuid5) so re-runs replace in place:
-- **`seed_data.py`** — single source of truth: 4 SMEs, 3 accounts each (mixed
-  MYR/USD/EUR/SGD), a historical reconciled job per tenant (B.1 `manual` exemplars +
-  B.3 outlier baselines), a pre-seeded "current" set (pending invoices + matching/noise
-  transactions + proofs), and a parallel FILE set. Every document tagged `db` vs `file`.
+## Seed / reset (SINGLE-tenant demo + eval baseline, idempotent — 2026-07-09)
+Rebuilt for the final demo: **one tenant (WZB Group), 2 MYR accounts, ~100 rows each of
+transactions/invoices/proofs**, documents attributed to realistic sources (Finverse feed,
+MyInvois, AutoCount, SQL Account, manual upload), plus a **ground-truth baseline** so a real
+reconcile run's accuracy / error-rate / time-saved is measurable. All ids uuid5-deterministic.
+- **`seed_data.py`** — single source of truth. One `SME_DEFS` entry (WZB, sme `111e…174111`,
+  Maybank `999e…174999`); A1 Maybank MYR (upload statements) + A2 CIMB MYR (Finverse
+  bank-feed, seeded `bank_feed_link`). ~66 pending invoices split across **difficulty tiers**:
+  **A** reference-key → deterministic pre-pass auto (~25%, the realistic ref-carrying slice);
+  **B/C/D** no reference → the **LLM matcher** handles them (the mass, ~58%); **E** edge cases
+  (overpaid / no-proof / beneficiary-mismatch / bank-detail-change / outlier / duplicate)
+  carrying refs so the deterministic **gate/verifier/anomaly rules** decide their disposition.
+  Plus failure paths (failed invoice+proof parse). `build()` emits an **expectations map**
+  (per-invoice `expected_transaction_id` / `expected_status` / `matcher`) — the oracle.
 - **`seed_demo.py`** — the reseed. **Destructive + idempotent:** wipes ALL tenant data
-  (FK-safe order), prunes stray Supabase Auth users, provisions exactly 4 loginable demo
-  users (service-role admin API, email pre-confirmed), inserts accounts/FX/history/current.
-  Run: `PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe seed_demo.py`. Upserts (never wipes)
-  `exchange_rate`.
-- **`seed_files.py`** — (re)generates the "file half" under `test_files/` + `sme_infos` +
-  `README.md`. Run after `seed_demo.py`.
-- Seeds ~132 transactions, 56 invoices, 12 proofs, 20 historical matches across 4 tenants.
-  Edge cases: clean multi-currency auto-match, FX, over-paid→escalate, unmatched, B.2
-  high-value-no-proof + weak-link (downgrade on run), B.3 duplicate-invoice /
-  beneficiary-mismatch / bank-detail-change / amount-outlier, failed invoice & proof parse,
-  statement format coverage (ISO+signed CSV / dd-mm-yyyy CSV / debit-credit XLSX).
-- `test_files/` is now per-tenant: `test_files/<slug>/{bank_statements,invoices,payment_proofs}/`
-  (12 statements + 20 invoices + 20 proofs). NOT pre-seeded — uploading them tests the parse
-  pipeline (PDF→PyMuPDF→Morpheus, PNG→Tesseract→Morpheus). `test_files/sme_infos` (JSON) is the
-  manifest: per-tenant logins, accounts, pre-seeded-vs-file docs, expected reconciliation.
-  (Old scratchpad `gen_test_files.py` retired; old single-tenant 9-file layout replaced.)
+  (FK-safe), prunes stray Auth users, provisions the ONE demo login, inserts
+  accounts/FX/history/current + mock connector state (bank_feed_link, accounting_credential
+  autocount+sql, myinvois_credential — all `environment=mock`) so Connect/Sync are pre-wired.
+  Run: `PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe seed_demo.py`. Upserts `exchange_rate`.
+- **`seed_files.py`** — regenerates the **~quarter** delivered as uploadable files under
+  `test_files/wzb_group/{bank_statements,invoices,payment_proofs}/` + a `_invalid/` folder
+  (corrupt.pdf / empty.csv / bad_schema.csv / unsupported.txt for upload-failure paths) +
+  `sme_infos` + **`expected_reconciliation.json`** (the baseline) + `README.md`.
+- **`eval_recon.py`** — runs a real reconcile (agent or legacy per USE_AGENT), scores actual
+  vs `expected_reconciliation.json`: overall + **per-matcher** accuracy (the `llm` subset is
+  the true "AI accuracy"), auto-commit precision/recall, per-tier breakdown, and time saved.
+  Accuracy is deliberately **~80–90%, not 100%** (D/E tiers are genuinely ambiguous); a ~100%
+  `llm` score means the hard cases regressed. `--score-only` scores the latest job; `--selftest`
+  checks the scoring math. Time model (`manual_min_per_invoice`/`review_min_per_flag`) is a knob.
+- **Live-sync increment:** the client mock fixtures (`bank_feed_client._MOCK_TXNS`,
+  `accounting_client._MOCK_INVOICES`, `myinvois_client._MOCK_DOCS`) are expanded and
+  cross-aligned (feed credit `REF AC-INV-000x` ↔ AutoCount/SQL/MyInvois invoices) as a
+  DISJOINT batch, so an on-stage sync/connect adds fresh matching rows without double-counting.
 
 ## Major decisions & upgrades (this session)
 1. **Merged** 3 upload pages → `/uploads` with a custom `SegmentedControl`; nav

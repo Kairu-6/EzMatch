@@ -269,22 +269,35 @@ _MOCK_IDENTITY = {
     ],
 }
 
+def _mt(txn_id, day, value, desc, currency="MYR", pending=False):
+    return {"transaction_id": txn_id, "posted_date": f"2026-06-{day:02d}", "is_pending": pending,
+            "amount": {"currency": currency, "value": value, "raw": f"{value}"},
+            "description": desc}
+
+
+# The demoable LIVE increment: testbank credits whose DuitNow/IBG references mirror the
+# AutoCount/SQL/MyInvois mock invoice numbers, so on stage a mock accounting/e-Invoice
+# sync + this feed sync reconcile against EACH OTHER. Disjoint from the pre-seeded rows.
 _MOCK_TXNS = [
-    {"transaction_id": "mock-fv-txn-0001", "posted_date": "2026-06-12", "is_pending": False,
-     "amount": {"currency": "MYR", "value": 6656.00, "raw": "6656.00"},
-     "description": "DUITNOW CR PENANG FOODS SDN BHD REF AC-INV-0001"},
-    {"transaction_id": "mock-fv-txn-0002", "posted_date": "2026-06-10", "is_pending": False,
-     "amount": {"currency": "MYR", "value": 7600.00, "raw": "7600.00"},
-     "description": "DUITNOW CR CRESCENT TRADING SDN BHD REF AC-INV-0002"},
-    {"transaction_id": "mock-fv-txn-0003", "posted_date": "2026-06-11", "is_pending": False,
-     "amount": {"currency": "MYR", "value": 5400.00, "raw": "5400.00"},
-     "description": "IBG CR SELAT SHIPPING SDN BHD REF AC-INV-0003"},
-    {"transaction_id": "mock-fv-txn-0004", "posted_date": "2026-06-13", "is_pending": False,
-     "amount": {"currency": "MYR", "value": -1280.50, "raw": "-1280.50"},
-     "description": "DUITNOW DR OFFICE SUPPLIES TRADING"},  # noise / stays unmatched
-    {"transaction_id": "mock-fv-txn-0005", "posted_date": "2026-06-14", "is_pending": True,
-     "amount": {"currency": "MYR", "value": 999.00, "raw": "999.00"},
-     "description": "PENDING AUTHORIZATION HOLD"},  # dropped: is_pending
+    _mt("mock-fv-txn-0001", 12, 6656.00, "DUITNOW CR PENANG FOODS SDN BHD REF AC-INV-0001"),
+    _mt("mock-fv-txn-0002", 10, 7600.00, "DUITNOW CR CRESCENT TRADING SDN BHD REF AC-INV-0002"),
+    _mt("mock-fv-txn-0003", 11, 5400.00, "IBG CR SELAT SHIPPING SDN BHD REF AC-INV-0003"),
+    _mt("mock-fv-txn-0006", 15, 9120.00, "DUITNOW CR REMBAU RUBBER SDN BHD REF AC-INV-0005"),
+    _mt("mock-fv-txn-0007", 16, 4380.00, "IBG CR KUANTAN CERAMICS REF AC-INV-0006"),
+    _mt("mock-fv-txn-0008", 17, 3175.00, "DUITNOW CR BENTONG GINGER TRADERS REF AC-INV-0007"),
+    _mt("mock-fv-txn-0009", 18, 8890.00, "IBG CR MUAR FURNITURE BHD REF AC-INV-0008"),
+    _mt("mock-fv-txn-0010", 13, 5289.40, "DUITNOW CR SELANGOR FOODS SDN BHD REF SQL-INV-0002"),
+    _mt("mock-fv-txn-0011", 14, 6210.00, "IBG CR ALOR SETAR TEXTILES REF SQL-INV-0003"),
+    _mt("mock-fv-txn-0012", 19, 4750.00, "DUITNOW CR SUNGAI PETANI STEEL REF SQL-INV-0004"),
+    _mt("mock-fv-txn-0013", 20, 3990.00, "IBG CR TAIPING TEA COMPANY REF SQL-INV-0005"),
+    _mt("mock-fv-txn-0014", 22, 8400.00, "DUITNOW CR SERI MUTIARA ENTERPRISE REF EINV-2026-002"),
+    _mt("mock-fv-txn-0015", 21, 7250.00, "IBG CR PUCHONG PLASTICS REF EINV-2026-006"),
+    _mt("mock-fv-txn-0004", 13, -1280.50, "DUITNOW DR OFFICE SUPPLIES TRADING"),   # noise debit
+    _mt("mock-fv-txn-0016", 23, -540.00, "DUITNOW DR CLOUD SUBSCRIPTION"),          # noise debit
+    # Multi-currency: testbank hands back a BTC row; the sync endpoint drops currencies
+    # not in the `currency` table (else the FK fails the batch). Kept here to exercise it.
+    _mt("mock-fv-txn-btc", 24, 0.05, "CRYPTO SETTLEMENT INBOUND", currency="BTC"),
+    _mt("mock-fv-txn-0005", 14, 999.00, "PENDING AUTHORIZATION HOLD", pending=True),  # dropped
 ]
 
 
@@ -295,7 +308,8 @@ def _demo():
     parsed = get_transactions(_MOCK_IDENTITY)
     assert parsed["status"] == "success"
     rows = parsed["data"]
-    assert len(rows) == 4, f"expected 4 (1 pending dropped), got {len(rows)}"
+    expected = len([t for t in _MOCK_TXNS if not t["is_pending"]])  # 1 pending dropped
+    assert len(rows) == expected, f"expected {expected}, got {len(rows)}"
     seam_keys = {"transaction_id", "transaction_date", "description", "description_normalised",
                  "reference_number", "debit_amount", "credit_amount", "currency_code",
                  "running_balance", "is_matched"}
@@ -306,10 +320,12 @@ def _demo():
     assert credit["reference_number"] == "AC-INV-0001", credit["reference_number"]
     debit = next(r for r in rows if r["transaction_id"] == "mock-fv-txn-0004")
     assert debit["debit_amount"] == 1280.50 and debit["credit_amount"] is None
-    # 06-14 belonged to the dropped pending row, so the real max is 06-13.
-    assert parsed["meta"]["date_range"] == {"from": "2026-06-10", "to": "2026-06-13"}
+    # The BTC row survives the client (valid 3-letter code) — the SYNC endpoint filters it.
+    btc = next(r for r in rows if r["transaction_id"] == "mock-fv-txn-btc")
+    assert btc["currency_code"] == "BTC"
+    assert parsed["meta"]["date_range"] == {"from": "2026-06-10", "to": "2026-06-24"}
     assert create_link_session("SIGNED").startswith(_redirect_uri())
-    print("bank_feed_client self-check passed.")
+    print(f"bank_feed_client self-check passed ({len(rows)} rows).")
 
 
 if __name__ == "__main__":

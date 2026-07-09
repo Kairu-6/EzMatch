@@ -22,32 +22,26 @@
         "account_id": "41499317-3d54-56a5-8137-1290fb97dda5",
         "bank_name": "CIMB Bank",
         "account_number": "700112233445",
-        "currency_code": "USD",
-        "is_primary": false
-      },
-      {
-        "account_id": "64f37b5f-ac40-5c3b-91ba-f7fe1ed57dd9",
-        "bank_name": "HSBC",
-        "account_number": "300998877665",
-        "currency_code": "EUR",
+        "currency_code": "MYR",
         "is_primary": false
       }
     ],
     "preseeded_in_db": {
       "note": "Already loaded by seed_demo.py — do NOT upload these; they are the live reconcile/verify/anomaly demo plus a historical reconciled job.",
       "historical_matches": 5,
-      "current_pending_invoices": 11,
-      "transactions": 28,
-      "payment_proofs": 3,
+      "current_pending_invoices": 67,
+      "transactions": 81,
+      "payment_proofs": 50,
       "edge_cases_present": [
+        "amount_outlier",
         "b2_high_value_no_proof",
-        "b2_weak_link",
+        "bank_detail_change",
+        "beneficiary_mismatch",
         "duplicate_invoice",
         "escalate_overpaid",
         "failed_parse_invoice",
-        "reference_match_auto",
-        "reference_match_wrong_amount",
-        "unmatched_no_txn"
+        "failed_parse_proof",
+        "reference_decisive"
       ]
     },
     "file_uploads": {
@@ -82,708 +76,372 @@
             "account_id": "41499317-3d54-56a5-8137-1290fb97dda5",
             "bank_name": "CIMB Bank",
             "account_number": "700112233445",
-            "currency_code": "USD"
+            "currency_code": "MYR"
           },
           "role": "format coverage: split debit/credit columns (xlsx)"
         }
       ],
       "invoices": [
         {
-          "file": "wzb_group/invoices/invoice_FWZB-301.pdf",
-          "invoice_number": "FWZB-301",
-          "counterparty": "Nimbus Technologies",
-          "amount": 3250.0,
-          "currency": "USD",
-          "invoice_date": "2026-06-21",
-          "expected_credit_in_base": 15340.0,
-          "parser": "PyMuPDF+Morpheus"
-        },
-        {
-          "file": "wzb_group/invoices/invoice_FWZB-302.pdf",
-          "invoice_number": "FWZB-302",
-          "counterparty": "Hanseatic GmbH",
-          "amount": 1840.5,
-          "currency": "EUR",
-          "invoice_date": "2026-06-22",
-          "expected_credit_in_base": 9386.55,
-          "parser": "PyMuPDF+Morpheus"
-        },
-        {
-          "file": "wzb_group/invoices/invoice_FWZB-303.png",
-          "invoice_number": "FWZB-303",
-          "counterparty": "Lion City Pte",
-          "amount": 8000.0,
-          "currency": "SGD",
-          "invoice_date": "2026-06-23",
-          "expected_credit_in_base": 27920.0,
-          "parser": "Tesseract+Morpheus"
-        },
-        {
-          "file": "wzb_group/invoices/invoice_FWZB-304.pdf",
-          "invoice_number": "FWZB-304",
-          "counterparty": "Kuala Supplies",
-          "amount": 9100.0,
+          "file": "wzb_group/invoices/invoice_WZB-U01.png",
+          "invoice_number": "WZB-U01",
+          "counterparty": "Umbrella Trading",
+          "amount": 2200.0,
           "currency": "MYR",
-          "invoice_date": "2026-06-24",
-          "expected_credit_in_base": 9100.0,
+          "invoice_date": "2026-06-06",
+          "expected_credit_in_base": 2200.0,
+          "parser": "Tesseract+Morpheus"
+        },
+        {
+          "file": "wzb_group/invoices/invoice_WZB-U02.pdf",
+          "invoice_number": "WZB-U02",
+          "counterparty": "Stark Industries Asia",
+          "amount": 2505.0,
+          "currency": "USD",
+          "invoice_date": "2026-06-07",
+          "expected_credit_in_base": 11823.6,
           "parser": "PyMuPDF+Morpheus"
         },
         {
-          "file": "wzb_group/invoices/invoice_FWZB-305.png",
-          "invoice_number": "FWZB-305",
-          "counterparty": "Bremen GmbH",
-          "amount": 2600.0,
+          "file": "wzb_group/invoices/invoice_WZB-U03.pdf",
+          "invoice_number": "WZB-U03",
+          "counterparty": "Petaling Steelworks",
+          "amount": 2810.0,
           "currency": "EUR",
-          "invoice_date": "2026-06-25",
-          "expected_credit_in_base": 13260.0,
+          "invoice_date": "2026-06-08",
+          "expected_credit_in_base": 14331.0,
+          "parser": "PyMuPDF+Morpheus"
+        },
+        {
+          "file": "wzb_group/invoices/invoice_WZB-U04.png",
+          "invoice_number": "WZB-U04",
+          "counterparty": "Malacca Bay Trading",
+          "amount": 3115.0,
+          "currency": "SGD",
+          "invoice_date": "2026-06-09",
+          "expected_credit_in_base": 10871.35,
           "parser": "Tesseract+Morpheus"
+        },
+        {
+          "file": "wzb_group/invoices/invoice_WZB-U05.pdf",
+          "invoice_number": "WZB-U05",
+          "counterparty": "Perlis Rice Traders",
+          "amount": 3420.0,
+          "currency": "MYR",
+          "invoice_date": "2026-06-10",
+          "expected_credit_in_base": 3420.0,
+          "parser": "PyMuPDF+Morpheus"
+        },
+        {
+          "file": "wzb_group/invoices/invoice_WZB-U06.pdf",
+          "invoice_number": "WZB-U06",
+          "counterparty": "Peninsula Chemicals",
+          "amount": 3725.0,
+          "currency": "MYR",
+          "invoice_date": "2026-06-11",
+          "expected_credit_in_base": 3725.0,
+          "parser": "PyMuPDF+Morpheus"
+        },
+        {
+          "file": "wzb_group/invoices/invoice_WZB-U07.png",
+          "invoice_number": "WZB-U07",
+          "counterparty": "Wonka Foods Sdn Bhd",
+          "amount": 4030.0,
+          "currency": "USD",
+          "invoice_date": "2026-06-12",
+          "expected_credit_in_base": 19021.6,
+          "parser": "Tesseract+Morpheus"
+        },
+        {
+          "file": "wzb_group/invoices/invoice_WZB-U08.pdf",
+          "invoice_number": "WZB-U08",
+          "counterparty": "Cyberjaya Systems Sdn Bhd",
+          "amount": 4335.0,
+          "currency": "MYR",
+          "invoice_date": "2026-06-13",
+          "expected_credit_in_base": 4335.0,
+          "parser": "PyMuPDF+Morpheus"
+        },
+        {
+          "file": "wzb_group/invoices/invoice_WZB-U09.pdf",
+          "invoice_number": "WZB-U09",
+          "counterparty": "Evergreen Textiles",
+          "amount": 4640.0,
+          "currency": "EUR",
+          "invoice_date": "2026-06-14",
+          "expected_credit_in_base": 23664.0,
+          "parser": "PyMuPDF+Morpheus"
+        },
+        {
+          "file": "wzb_group/invoices/invoice_WZB-U10.png",
+          "invoice_number": "WZB-U10",
+          "counterparty": "Langkawi Marine Supplies",
+          "amount": 4945.0,
+          "currency": "MYR",
+          "invoice_date": "2026-06-15",
+          "expected_credit_in_base": 4945.0,
+          "parser": "Tesseract+Morpheus"
+        },
+        {
+          "file": "wzb_group/invoices/invoice_WZB-U11.pdf",
+          "invoice_number": "WZB-U11",
+          "counterparty": "Nakatomi Trading",
+          "amount": 5250.0,
+          "currency": "MYR",
+          "invoice_date": "2026-06-16",
+          "expected_credit_in_base": 5250.0,
+          "parser": "PyMuPDF+Morpheus"
+        },
+        {
+          "file": "wzb_group/invoices/invoice_WZB-U12.pdf",
+          "invoice_number": "WZB-U12",
+          "counterparty": "Kuching Rattan Exports",
+          "amount": 5555.0,
+          "currency": "USD",
+          "invoice_date": "2026-06-17",
+          "expected_credit_in_base": 26219.6,
+          "parser": "PyMuPDF+Morpheus"
+        },
+        {
+          "file": "wzb_group/invoices/invoice_WZB-U13.png",
+          "invoice_number": "WZB-U13",
+          "counterparty": "Prestige Worldwide",
+          "amount": 5860.0,
+          "currency": "MYR",
+          "invoice_date": "2026-06-18",
+          "expected_credit_in_base": 5860.0,
+          "parser": "Tesseract+Morpheus"
+        },
+        {
+          "file": "wzb_group/invoices/invoice_WZB-U14.pdf",
+          "invoice_number": "WZB-U14",
+          "counterparty": "Silver Peak Trading",
+          "amount": 6165.0,
+          "currency": "EUR",
+          "invoice_date": "2026-06-19",
+          "expected_credit_in_base": 31441.5,
+          "parser": "PyMuPDF+Morpheus"
+        },
+        {
+          "file": "wzb_group/invoices/invoice_WZB-U15.pdf",
+          "invoice_number": "WZB-U15",
+          "counterparty": "Sapphire Electronics",
+          "amount": 6470.0,
+          "currency": "MYR",
+          "invoice_date": "2026-06-20",
+          "expected_credit_in_base": 6470.0,
+          "parser": "PyMuPDF+Morpheus"
+        },
+        {
+          "file": "wzb_group/invoices/invoice_WZB-U16.png",
+          "invoice_number": "WZB-U16",
+          "counterparty": "Summit Components",
+          "amount": 6775.0,
+          "currency": "MYR",
+          "invoice_date": "2026-06-21",
+          "expected_credit_in_base": 6775.0,
+          "parser": "Tesseract+Morpheus"
+        },
+        {
+          "file": "wzb_group/invoices/invoice_WZB-U17.pdf",
+          "invoice_number": "WZB-U17",
+          "counterparty": "Pahang Gold Mining",
+          "amount": 7080.0,
+          "currency": "USD",
+          "invoice_date": "2026-06-22",
+          "expected_credit_in_base": 33417.6,
+          "parser": "PyMuPDF+Morpheus"
+        },
+        {
+          "file": "wzb_group/invoices/invoice_WZB-U18.pdf",
+          "invoice_number": "WZB-U18",
+          "counterparty": "Georgetown Spice Co",
+          "amount": 7385.0,
+          "currency": "MYR",
+          "invoice_date": "2026-06-23",
+          "expected_credit_in_base": 7385.0,
+          "parser": "PyMuPDF+Morpheus"
         }
       ],
       "payment_proofs": [
         {
-          "file": "wzb_group/payment_proofs/proof_SWIFT-USD-9920.pdf",
-          "reference": "SWIFT-USD-9920",
-          "amount": 3250.0,
-          "currency": "USD",
-          "corroborates_invoice": "FWZB-301",
-          "rail": null,
-          "recipient_reference": "FWZB-301",
-          "parser": "PyMuPDF+Morpheus"
-        },
-        {
-          "file": "wzb_group/payment_proofs/proof_SEPA-7741.png",
-          "reference": "SEPA-7741",
-          "amount": 1840.5,
-          "currency": "EUR",
-          "corroborates_invoice": "FWZB-302",
-          "rail": null,
-          "recipient_reference": "FWZB-302",
-          "parser": "Tesseract+Morpheus"
-        },
-        {
-          "file": "wzb_group/payment_proofs/proof_TT-LION-553.pdf",
-          "reference": "TT-LION-553",
-          "amount": 8000.0,
-          "currency": "SGD",
-          "corroborates_invoice": "FWZB-303",
-          "rail": null,
-          "recipient_reference": "FWZB-303",
-          "parser": "PyMuPDF+Morpheus"
-        },
-        {
-          "file": "wzb_group/payment_proofs/proof_DN-KUALA-118.pdf",
-          "reference": "DN-KUALA-118",
-          "amount": 9100.0,
+          "file": "wzb_group/payment_proofs/proof_UPL-WZB-U01.pdf",
+          "reference": "UPL-WZB-U01",
+          "amount": 2200.0,
           "currency": "MYR",
-          "corroborates_invoice": "FWZB-304",
+          "corroborates_invoice": "WZB-U01",
           "rail": "DuitNow",
-          "recipient_reference": "FWZB-304",
+          "recipient_reference": "WZB-U01",
           "parser": "PyMuPDF+Morpheus"
         },
         {
-          "file": "wzb_group/payment_proofs/proof_SEPA-BREMEN-9.png",
-          "reference": "SEPA-BREMEN-9",
-          "amount": 2600.0,
-          "currency": "EUR",
-          "corroborates_invoice": "FWZB-305",
-          "rail": null,
-          "recipient_reference": "FWZB-305",
-          "parser": "Tesseract+Morpheus"
-        }
-      ]
-    },
-    "dependency_chains": {
-      "bank": "bank_transaction.statement_id -> bank_statement.account_id -> bank_account.sme_id -> sme",
-      "invoice": "invoice.sme_id -> sme",
-      "proof": "payment_proof.sme_id -> sme ; payment_proof.invoice_id -> invoice",
-      "match": "reconciliation_match.job_id -> reconciliation_job.sme_id -> sme"
-    }
-  },
-  {
-    "sme_id": "22222222-2222-4222-8222-222222222222",
-    "company_name": "Nusantara Logistics Sdn Bhd",
-    "registration_no": "201998811223",
-    "country_code": "MY",
-    "base_currency": "MYR",
-    "login": {
-      "email": "ops@nusantara-logistics.my",
-      "password": "TreasuryFlow#2026",
-      "note": "email pre-confirmed by the reseed; password shared across all demo tenants"
-    },
-    "bank_accounts": [
-      {
-        "account_id": "368f8068-d22f-5794-863f-a6766e4f862c",
-        "bank_name": "Public Bank",
-        "account_number": "388112200334",
-        "currency_code": "MYR",
-        "is_primary": true
-      },
-      {
-        "account_id": "8e54032a-59f1-5f87-98b4-c1501f0a311f",
-        "bank_name": "RHB Bank",
-        "account_number": "211445566778",
-        "currency_code": "USD",
-        "is_primary": false
-      },
-      {
-        "account_id": "3f65a6d6-9f44-52fb-880c-b117529482e0",
-        "bank_name": "Maybank",
-        "account_number": "514998877001",
-        "currency_code": "SGD",
-        "is_primary": false
-      }
-    ],
-    "preseeded_in_db": {
-      "note": "Already loaded by seed_demo.py — do NOT upload these; they are the live reconcile/verify/anomaly demo plus a historical reconciled job.",
-      "historical_matches": 5,
-      "current_pending_invoices": 10,
-      "transactions": 28,
-      "payment_proofs": 2,
-      "edge_cases_present": [
-        "amount_outlier",
-        "b2_high_value_no_proof",
-        "b2_weak_link",
-        "duplicate_invoice",
-        "escalate_overpaid",
-        "failed_parse_invoice",
-        "unmatched_no_txn"
-      ]
-    },
-    "file_uploads": {
-      "note": "NOT in the DB — upload these to exercise the parse pipeline, then run reconciliation. Statements go to the noted account.",
-      "bank_statements": [
-        {
-          "file": "nusantara_logistics/bank_statements/statement_primary_iso.csv",
-          "format": "csv_signed",
-          "upload_to_account": {
-            "account_id": "368f8068-d22f-5794-863f-a6766e4f862c",
-            "bank_name": "Public Bank",
-            "account_number": "388112200334",
-            "currency_code": "MYR"
-          },
-          "role": "reconciliation driver for the file invoices (ISO date, signed amount)"
-        },
-        {
-          "file": "nusantara_logistics/bank_statements/statement_ddmmyyyy.csv",
-          "format": "csv_ddmmyyyy",
-          "upload_to_account": {
-            "account_id": "368f8068-d22f-5794-863f-a6766e4f862c",
-            "bank_name": "Public Bank",
-            "account_number": "388112200334",
-            "currency_code": "MYR"
-          },
-          "role": "format coverage: dd/mm/yyyy dates + noise only"
-        },
-        {
-          "file": "nusantara_logistics/bank_statements/statement_debit_credit.xlsx",
-          "format": "xlsx_debit_credit",
-          "upload_to_account": {
-            "account_id": "8e54032a-59f1-5f87-98b4-c1501f0a311f",
-            "bank_name": "RHB Bank",
-            "account_number": "211445566778",
-            "currency_code": "USD"
-          },
-          "role": "format coverage: split debit/credit columns (xlsx)"
-        }
-      ],
-      "invoices": [
-        {
-          "file": "nusantara_logistics/invoices/invoice_FNUS-301.pdf",
-          "invoice_number": "FNUS-301",
-          "counterparty": "Nimbus Technologies",
-          "amount": 3250.0,
+          "file": "wzb_group/payment_proofs/proof_UPL-WZB-U02.png",
+          "reference": "UPL-WZB-U02",
+          "amount": 2505.0,
           "currency": "USD",
-          "invoice_date": "2026-06-21",
-          "expected_credit_in_base": 15340.0,
-          "parser": "PyMuPDF+Morpheus"
-        },
-        {
-          "file": "nusantara_logistics/invoices/invoice_FNUS-302.pdf",
-          "invoice_number": "FNUS-302",
-          "counterparty": "Hanseatic GmbH",
-          "amount": 1840.5,
-          "currency": "EUR",
-          "invoice_date": "2026-06-22",
-          "expected_credit_in_base": 9386.55,
-          "parser": "PyMuPDF+Morpheus"
-        },
-        {
-          "file": "nusantara_logistics/invoices/invoice_FNUS-303.png",
-          "invoice_number": "FNUS-303",
-          "counterparty": "Lion City Pte",
-          "amount": 8000.0,
-          "currency": "SGD",
-          "invoice_date": "2026-06-23",
-          "expected_credit_in_base": 27920.0,
+          "corroborates_invoice": "WZB-U02",
+          "rail": null,
+          "recipient_reference": "WZB-U02",
           "parser": "Tesseract+Morpheus"
         },
         {
-          "file": "nusantara_logistics/invoices/invoice_FNUS-304.pdf",
-          "invoice_number": "FNUS-304",
-          "counterparty": "Kuala Supplies",
-          "amount": 9100.0,
+          "file": "wzb_group/payment_proofs/proof_UPL-WZB-U03.pdf",
+          "reference": "UPL-WZB-U03",
+          "amount": 2810.0,
+          "currency": "EUR",
+          "corroborates_invoice": "WZB-U03",
+          "rail": null,
+          "recipient_reference": "WZB-U03",
+          "parser": "PyMuPDF+Morpheus"
+        },
+        {
+          "file": "wzb_group/payment_proofs/proof_UPL-WZB-U04.png",
+          "reference": "UPL-WZB-U04",
+          "amount": 3115.0,
+          "currency": "SGD",
+          "corroborates_invoice": "WZB-U04",
+          "rail": null,
+          "recipient_reference": "WZB-U04",
+          "parser": "Tesseract+Morpheus"
+        },
+        {
+          "file": "wzb_group/payment_proofs/proof_UPL-WZB-U05.pdf",
+          "reference": "UPL-WZB-U05",
+          "amount": 3420.0,
           "currency": "MYR",
-          "invoice_date": "2026-06-24",
-          "expected_credit_in_base": 9100.0,
+          "corroborates_invoice": "WZB-U05",
+          "rail": "DuitNow",
+          "recipient_reference": "WZB-U05",
           "parser": "PyMuPDF+Morpheus"
         },
         {
-          "file": "nusantara_logistics/invoices/invoice_FNUS-305.png",
-          "invoice_number": "FNUS-305",
-          "counterparty": "Bremen GmbH",
-          "amount": 2600.0,
-          "currency": "EUR",
-          "invoice_date": "2026-06-25",
-          "expected_credit_in_base": 13260.0,
-          "parser": "Tesseract+Morpheus"
-        }
-      ],
-      "payment_proofs": [
-        {
-          "file": "nusantara_logistics/payment_proofs/proof_SWIFT-USD-9920.pdf",
-          "reference": "SWIFT-USD-9920",
-          "amount": 3250.0,
-          "currency": "USD",
-          "corroborates_invoice": "FNUS-301",
-          "rail": null,
-          "recipient_reference": "FNUS-301",
-          "parser": "PyMuPDF+Morpheus"
-        },
-        {
-          "file": "nusantara_logistics/payment_proofs/proof_SEPA-7741.png",
-          "reference": "SEPA-7741",
-          "amount": 1840.5,
-          "currency": "EUR",
-          "corroborates_invoice": "FNUS-302",
-          "rail": null,
-          "recipient_reference": "FNUS-302",
-          "parser": "Tesseract+Morpheus"
-        },
-        {
-          "file": "nusantara_logistics/payment_proofs/proof_TT-LION-553.pdf",
-          "reference": "TT-LION-553",
-          "amount": 8000.0,
-          "currency": "SGD",
-          "corroborates_invoice": "FNUS-303",
-          "rail": null,
-          "recipient_reference": "FNUS-303",
-          "parser": "PyMuPDF+Morpheus"
-        },
-        {
-          "file": "nusantara_logistics/payment_proofs/proof_DN-KUALA-118.pdf",
-          "reference": "DN-KUALA-118",
-          "amount": 9100.0,
+          "file": "wzb_group/payment_proofs/proof_UPL-WZB-U06.png",
+          "reference": "UPL-WZB-U06",
+          "amount": 3725.0,
           "currency": "MYR",
-          "corroborates_invoice": "FNUS-304",
+          "corroborates_invoice": "WZB-U06",
           "rail": "DuitNow",
-          "recipient_reference": "FNUS-304",
-          "parser": "PyMuPDF+Morpheus"
-        },
-        {
-          "file": "nusantara_logistics/payment_proofs/proof_SEPA-BREMEN-9.png",
-          "reference": "SEPA-BREMEN-9",
-          "amount": 2600.0,
-          "currency": "EUR",
-          "corroborates_invoice": "FNUS-305",
-          "rail": null,
-          "recipient_reference": "FNUS-305",
+          "recipient_reference": "WZB-U06",
           "parser": "Tesseract+Morpheus"
-        }
-      ]
-    },
-    "dependency_chains": {
-      "bank": "bank_transaction.statement_id -> bank_statement.account_id -> bank_account.sme_id -> sme",
-      "invoice": "invoice.sme_id -> sme",
-      "proof": "payment_proof.sme_id -> sme ; payment_proof.invoice_id -> invoice",
-      "match": "reconciliation_match.job_id -> reconciliation_job.sme_id -> sme"
-    }
-  },
-  {
-    "sme_id": "33333333-3333-4333-8333-333333333333",
-    "company_name": "Selangor Textiles Bhd",
-    "registration_no": "200512334455",
-    "country_code": "MY",
-    "base_currency": "MYR",
-    "login": {
-      "email": "finance@selangortextiles.my",
-      "password": "TreasuryFlow#2026",
-      "note": "email pre-confirmed by the reseed; password shared across all demo tenants"
-    },
-    "bank_accounts": [
-      {
-        "account_id": "5b3bb43f-729f-5752-9ade-80c81114a0bc",
-        "bank_name": "CIMB Bank",
-        "account_number": "800221144556",
-        "currency_code": "MYR",
-        "is_primary": true
-      },
-      {
-        "account_id": "5a201d53-0f4f-5997-ae6e-5e6b72119ed3",
-        "bank_name": "Bank Islam",
-        "account_number": "140778899221",
-        "currency_code": "USD",
-        "is_primary": false
-      },
-      {
-        "account_id": "27442c93-ea9f-5bf3-9189-c14b86c8adca",
-        "bank_name": "OCBC",
-        "account_number": "555330011446",
-        "currency_code": "EUR",
-        "is_primary": false
-      }
-    ],
-    "preseeded_in_db": {
-      "note": "Already loaded by seed_demo.py — do NOT upload these; they are the live reconcile/verify/anomaly demo plus a historical reconciled job.",
-      "historical_matches": 5,
-      "current_pending_invoices": 8,
-      "transactions": 28,
-      "payment_proofs": 4,
-      "edge_cases_present": [
-        "b2_high_value_no_proof",
-        "b2_weak_link",
-        "beneficiary_mismatch",
-        "escalate_overpaid",
-        "failed_parse_invoice",
-        "failed_parse_proof",
-        "unmatched_no_txn"
-      ]
-    },
-    "file_uploads": {
-      "note": "NOT in the DB — upload these to exercise the parse pipeline, then run reconciliation. Statements go to the noted account.",
-      "bank_statements": [
-        {
-          "file": "selangor_textiles/bank_statements/statement_primary_iso.csv",
-          "format": "csv_signed",
-          "upload_to_account": {
-            "account_id": "5b3bb43f-729f-5752-9ade-80c81114a0bc",
-            "bank_name": "CIMB Bank",
-            "account_number": "800221144556",
-            "currency_code": "MYR"
-          },
-          "role": "reconciliation driver for the file invoices (ISO date, signed amount)"
         },
         {
-          "file": "selangor_textiles/bank_statements/statement_ddmmyyyy.csv",
-          "format": "csv_ddmmyyyy",
-          "upload_to_account": {
-            "account_id": "5b3bb43f-729f-5752-9ade-80c81114a0bc",
-            "bank_name": "CIMB Bank",
-            "account_number": "800221144556",
-            "currency_code": "MYR"
-          },
-          "role": "format coverage: dd/mm/yyyy dates + noise only"
-        },
-        {
-          "file": "selangor_textiles/bank_statements/statement_debit_credit.xlsx",
-          "format": "xlsx_debit_credit",
-          "upload_to_account": {
-            "account_id": "5a201d53-0f4f-5997-ae6e-5e6b72119ed3",
-            "bank_name": "Bank Islam",
-            "account_number": "140778899221",
-            "currency_code": "USD"
-          },
-          "role": "format coverage: split debit/credit columns (xlsx)"
-        }
-      ],
-      "invoices": [
-        {
-          "file": "selangor_textiles/invoices/invoice_FSEL-301.pdf",
-          "invoice_number": "FSEL-301",
-          "counterparty": "Nimbus Technologies",
-          "amount": 3250.0,
+          "file": "wzb_group/payment_proofs/proof_UPL-WZB-U07.pdf",
+          "reference": "UPL-WZB-U07",
+          "amount": 4030.0,
           "currency": "USD",
-          "invoice_date": "2026-06-21",
-          "expected_credit_in_base": 15340.0,
+          "corroborates_invoice": "WZB-U07",
+          "rail": null,
+          "recipient_reference": "WZB-U07",
           "parser": "PyMuPDF+Morpheus"
         },
         {
-          "file": "selangor_textiles/invoices/invoice_FSEL-302.pdf",
-          "invoice_number": "FSEL-302",
-          "counterparty": "Hanseatic GmbH",
-          "amount": 1840.5,
-          "currency": "EUR",
-          "invoice_date": "2026-06-22",
-          "expected_credit_in_base": 9386.55,
-          "parser": "PyMuPDF+Morpheus"
-        },
-        {
-          "file": "selangor_textiles/invoices/invoice_FSEL-303.png",
-          "invoice_number": "FSEL-303",
-          "counterparty": "Lion City Pte",
-          "amount": 8000.0,
-          "currency": "SGD",
-          "invoice_date": "2026-06-23",
-          "expected_credit_in_base": 27920.0,
-          "parser": "Tesseract+Morpheus"
-        },
-        {
-          "file": "selangor_textiles/invoices/invoice_FSEL-304.pdf",
-          "invoice_number": "FSEL-304",
-          "counterparty": "Kuala Supplies",
-          "amount": 9100.0,
+          "file": "wzb_group/payment_proofs/proof_UPL-WZB-U08.png",
+          "reference": "UPL-WZB-U08",
+          "amount": 4335.0,
           "currency": "MYR",
-          "invoice_date": "2026-06-24",
-          "expected_credit_in_base": 9100.0,
-          "parser": "PyMuPDF+Morpheus"
-        },
-        {
-          "file": "selangor_textiles/invoices/invoice_FSEL-305.png",
-          "invoice_number": "FSEL-305",
-          "counterparty": "Bremen GmbH",
-          "amount": 2600.0,
-          "currency": "EUR",
-          "invoice_date": "2026-06-25",
-          "expected_credit_in_base": 13260.0,
-          "parser": "Tesseract+Morpheus"
-        }
-      ],
-      "payment_proofs": [
-        {
-          "file": "selangor_textiles/payment_proofs/proof_SWIFT-USD-9920.pdf",
-          "reference": "SWIFT-USD-9920",
-          "amount": 3250.0,
-          "currency": "USD",
-          "corroborates_invoice": "FSEL-301",
-          "rail": null,
-          "recipient_reference": "FSEL-301",
-          "parser": "PyMuPDF+Morpheus"
-        },
-        {
-          "file": "selangor_textiles/payment_proofs/proof_SEPA-7741.png",
-          "reference": "SEPA-7741",
-          "amount": 1840.5,
-          "currency": "EUR",
-          "corroborates_invoice": "FSEL-302",
-          "rail": null,
-          "recipient_reference": "FSEL-302",
+          "corroborates_invoice": "WZB-U08",
+          "rail": "DuitNow",
+          "recipient_reference": "WZB-U08",
           "parser": "Tesseract+Morpheus"
         },
         {
-          "file": "selangor_textiles/payment_proofs/proof_TT-LION-553.pdf",
-          "reference": "TT-LION-553",
-          "amount": 8000.0,
-          "currency": "SGD",
-          "corroborates_invoice": "FSEL-303",
+          "file": "wzb_group/payment_proofs/proof_UPL-WZB-U09.pdf",
+          "reference": "UPL-WZB-U09",
+          "amount": 4640.0,
+          "currency": "EUR",
+          "corroborates_invoice": "WZB-U09",
           "rail": null,
-          "recipient_reference": "FSEL-303",
+          "recipient_reference": "WZB-U09",
           "parser": "PyMuPDF+Morpheus"
         },
         {
-          "file": "selangor_textiles/payment_proofs/proof_DN-KUALA-118.pdf",
-          "reference": "DN-KUALA-118",
-          "amount": 9100.0,
+          "file": "wzb_group/payment_proofs/proof_UPL-WZB-U10.png",
+          "reference": "UPL-WZB-U10",
+          "amount": 4945.0,
           "currency": "MYR",
-          "corroborates_invoice": "FSEL-304",
+          "corroborates_invoice": "WZB-U10",
           "rail": "DuitNow",
-          "recipient_reference": "FSEL-304",
+          "recipient_reference": "WZB-U10",
+          "parser": "Tesseract+Morpheus"
+        },
+        {
+          "file": "wzb_group/payment_proofs/proof_UPL-WZB-U11.pdf",
+          "reference": "UPL-WZB-U11",
+          "amount": 5250.0,
+          "currency": "MYR",
+          "corroborates_invoice": "WZB-U11",
+          "rail": "DuitNow",
+          "recipient_reference": "WZB-U11",
           "parser": "PyMuPDF+Morpheus"
         },
         {
-          "file": "selangor_textiles/payment_proofs/proof_SEPA-BREMEN-9.png",
-          "reference": "SEPA-BREMEN-9",
-          "amount": 2600.0,
-          "currency": "EUR",
-          "corroborates_invoice": "FSEL-305",
-          "rail": null,
-          "recipient_reference": "FSEL-305",
-          "parser": "Tesseract+Morpheus"
-        }
-      ]
-    },
-    "dependency_chains": {
-      "bank": "bank_transaction.statement_id -> bank_statement.account_id -> bank_account.sme_id -> sme",
-      "invoice": "invoice.sme_id -> sme",
-      "proof": "payment_proof.sme_id -> sme ; payment_proof.invoice_id -> invoice",
-      "match": "reconciliation_match.job_id -> reconciliation_job.sme_id -> sme"
-    }
-  },
-  {
-    "sme_id": "44444444-4444-4444-8444-444444444444",
-    "company_name": "Pearl Delta Trading Pte Ltd",
-    "registration_no": "S2021/77665G",
-    "country_code": "SG",
-    "base_currency": "SGD",
-    "login": {
-      "email": "accounts@pearldelta.sg",
-      "password": "TreasuryFlow#2026",
-      "note": "email pre-confirmed by the reseed; password shared across all demo tenants"
-    },
-    "bank_accounts": [
-      {
-        "account_id": "e0e82afc-164e-551a-a63a-b87e30b0c0fd",
-        "bank_name": "DBS Bank",
-        "account_number": "0011224455",
-        "currency_code": "SGD",
-        "is_primary": true
-      },
-      {
-        "account_id": "436ab55e-67d5-5c9e-9d13-7cfcad3ac2d1",
-        "bank_name": "UOB",
-        "account_number": "3398877221",
-        "currency_code": "USD",
-        "is_primary": false
-      },
-      {
-        "account_id": "b2e718b0-2f92-50cd-bdd4-8dde2176ff3f",
-        "bank_name": "Maybank SG",
-        "account_number": "0455667788",
-        "currency_code": "MYR",
-        "is_primary": false
-      }
-    ],
-    "preseeded_in_db": {
-      "note": "Already loaded by seed_demo.py — do NOT upload these; they are the live reconcile/verify/anomaly demo plus a historical reconciled job.",
-      "historical_matches": 5,
-      "current_pending_invoices": 9,
-      "transactions": 28,
-      "payment_proofs": 4,
-      "edge_cases_present": [
-        "b2_high_value_no_proof",
-        "b2_weak_link",
-        "bank_detail_change",
-        "escalate_overpaid",
-        "failed_parse_invoice",
-        "unmatched_no_txn"
-      ]
-    },
-    "file_uploads": {
-      "note": "NOT in the DB — upload these to exercise the parse pipeline, then run reconciliation. Statements go to the noted account.",
-      "bank_statements": [
-        {
-          "file": "pearl_delta/bank_statements/statement_primary_iso.csv",
-          "format": "csv_signed",
-          "upload_to_account": {
-            "account_id": "e0e82afc-164e-551a-a63a-b87e30b0c0fd",
-            "bank_name": "DBS Bank",
-            "account_number": "0011224455",
-            "currency_code": "SGD"
-          },
-          "role": "reconciliation driver for the file invoices (ISO date, signed amount)"
-        },
-        {
-          "file": "pearl_delta/bank_statements/statement_ddmmyyyy.csv",
-          "format": "csv_ddmmyyyy",
-          "upload_to_account": {
-            "account_id": "e0e82afc-164e-551a-a63a-b87e30b0c0fd",
-            "bank_name": "DBS Bank",
-            "account_number": "0011224455",
-            "currency_code": "SGD"
-          },
-          "role": "format coverage: dd/mm/yyyy dates + noise only"
-        },
-        {
-          "file": "pearl_delta/bank_statements/statement_debit_credit.xlsx",
-          "format": "xlsx_debit_credit",
-          "upload_to_account": {
-            "account_id": "436ab55e-67d5-5c9e-9d13-7cfcad3ac2d1",
-            "bank_name": "UOB",
-            "account_number": "3398877221",
-            "currency_code": "USD"
-          },
-          "role": "format coverage: split debit/credit columns (xlsx)"
-        }
-      ],
-      "invoices": [
-        {
-          "file": "pearl_delta/invoices/invoice_FPEA-301.pdf",
-          "invoice_number": "FPEA-301",
-          "counterparty": "Nimbus Technologies",
-          "amount": 3250.0,
+          "file": "wzb_group/payment_proofs/proof_UPL-WZB-U12.png",
+          "reference": "UPL-WZB-U12",
+          "amount": 5555.0,
           "currency": "USD",
-          "invoice_date": "2026-06-21",
-          "expected_credit_in_base": 4387.5,
-          "parser": "PyMuPDF+Morpheus"
-        },
-        {
-          "file": "pearl_delta/invoices/invoice_FPEA-302.pdf",
-          "invoice_number": "FPEA-302",
-          "counterparty": "Hanseatic GmbH",
-          "amount": 1840.5,
-          "currency": "EUR",
-          "invoice_date": "2026-06-22",
-          "expected_credit_in_base": 2687.13,
-          "parser": "PyMuPDF+Morpheus"
-        },
-        {
-          "file": "pearl_delta/invoices/invoice_FPEA-303.png",
-          "invoice_number": "FPEA-303",
-          "counterparty": "Lion City Pte",
-          "amount": 8000.0,
-          "currency": "SGD",
-          "invoice_date": "2026-06-23",
-          "expected_credit_in_base": 8000.0,
+          "corroborates_invoice": "WZB-U12",
+          "rail": null,
+          "recipient_reference": "WZB-U12",
           "parser": "Tesseract+Morpheus"
         },
         {
-          "file": "pearl_delta/invoices/invoice_FPEA-304.pdf",
-          "invoice_number": "FPEA-304",
-          "counterparty": "Kuala Supplies",
-          "amount": 9100.0,
-          "currency": "SGD",
-          "invoice_date": "2026-06-24",
-          "expected_credit_in_base": 9100.0,
+          "file": "wzb_group/payment_proofs/proof_UPL-WZB-U13.pdf",
+          "reference": "UPL-WZB-U13",
+          "amount": 5860.0,
+          "currency": "MYR",
+          "corroborates_invoice": "WZB-U13",
+          "rail": "DuitNow",
+          "recipient_reference": "WZB-U13",
           "parser": "PyMuPDF+Morpheus"
         },
         {
-          "file": "pearl_delta/invoices/invoice_FPEA-305.png",
-          "invoice_number": "FPEA-305",
-          "counterparty": "Bremen GmbH",
-          "amount": 2600.0,
+          "file": "wzb_group/payment_proofs/proof_UPL-WZB-U14.png",
+          "reference": "UPL-WZB-U14",
+          "amount": 6165.0,
           "currency": "EUR",
-          "invoice_date": "2026-06-25",
-          "expected_credit_in_base": 3796.0,
+          "corroborates_invoice": "WZB-U14",
+          "rail": null,
+          "recipient_reference": "WZB-U14",
           "parser": "Tesseract+Morpheus"
-        }
-      ],
-      "payment_proofs": [
+        },
         {
-          "file": "pearl_delta/payment_proofs/proof_SWIFT-USD-9920.pdf",
-          "reference": "SWIFT-USD-9920",
-          "amount": 3250.0,
+          "file": "wzb_group/payment_proofs/proof_UPL-WZB-U15.pdf",
+          "reference": "UPL-WZB-U15",
+          "amount": 6470.0,
+          "currency": "MYR",
+          "corroborates_invoice": "WZB-U15",
+          "rail": "DuitNow",
+          "recipient_reference": "WZB-U15",
+          "parser": "PyMuPDF+Morpheus"
+        },
+        {
+          "file": "wzb_group/payment_proofs/proof_UPL-WZB-U16.png",
+          "reference": "UPL-WZB-U16",
+          "amount": 6775.0,
+          "currency": "MYR",
+          "corroborates_invoice": "WZB-U16",
+          "rail": "DuitNow",
+          "recipient_reference": "WZB-U16",
+          "parser": "Tesseract+Morpheus"
+        },
+        {
+          "file": "wzb_group/payment_proofs/proof_UPL-WZB-U17.pdf",
+          "reference": "UPL-WZB-U17",
+          "amount": 7080.0,
           "currency": "USD",
-          "corroborates_invoice": "FPEA-301",
+          "corroborates_invoice": "WZB-U17",
           "rail": null,
-          "recipient_reference": "FPEA-301",
+          "recipient_reference": "WZB-U17",
           "parser": "PyMuPDF+Morpheus"
         },
         {
-          "file": "pearl_delta/payment_proofs/proof_SEPA-7741.png",
-          "reference": "SEPA-7741",
-          "amount": 1840.5,
-          "currency": "EUR",
-          "corroborates_invoice": "FPEA-302",
-          "rail": null,
-          "recipient_reference": "FPEA-302",
-          "parser": "Tesseract+Morpheus"
-        },
-        {
-          "file": "pearl_delta/payment_proofs/proof_TT-LION-553.pdf",
-          "reference": "TT-LION-553",
-          "amount": 8000.0,
-          "currency": "SGD",
-          "corroborates_invoice": "FPEA-303",
+          "file": "wzb_group/payment_proofs/proof_UPL-WZB-U18.png",
+          "reference": "UPL-WZB-U18",
+          "amount": 7385.0,
+          "currency": "MYR",
+          "corroborates_invoice": "WZB-U18",
           "rail": "DuitNow",
-          "recipient_reference": "FPEA-303",
-          "parser": "PyMuPDF+Morpheus"
-        },
-        {
-          "file": "pearl_delta/payment_proofs/proof_DN-KUALA-118.pdf",
-          "reference": "DN-KUALA-118",
-          "amount": 9100.0,
-          "currency": "SGD",
-          "corroborates_invoice": "FPEA-304",
-          "rail": "DuitNow",
-          "recipient_reference": "FPEA-304",
-          "parser": "PyMuPDF+Morpheus"
-        },
-        {
-          "file": "pearl_delta/payment_proofs/proof_SEPA-BREMEN-9.png",
-          "reference": "SEPA-BREMEN-9",
-          "amount": 2600.0,
-          "currency": "EUR",
-          "corroborates_invoice": "FPEA-305",
-          "rail": null,
-          "recipient_reference": "FPEA-305",
+          "recipient_reference": "WZB-U18",
           "parser": "Tesseract+Morpheus"
         }
       ]
