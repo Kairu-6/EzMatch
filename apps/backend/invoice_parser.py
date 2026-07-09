@@ -130,6 +130,10 @@ VALID_CURRENCIES = frozenset({
 
 def _validate_parsed_invoice(data: ParsedInvoiceData) -> str | None:
     """Return an error message if the parsed data would violate a DB constraint, else None."""
+    if not data.invoice_number or not data.invoice_number.strip():
+        return "Missing invoice number"
+    if not data.counterparty_name or not data.counterparty_name.strip():
+        return "Missing counterparty name"
     if data.invoice_amount is None or data.invoice_amount <= 0:
         return f"Invalid amount: {data.invoice_amount!r}"
     if data.invoice_currency not in VALID_CURRENCIES:
