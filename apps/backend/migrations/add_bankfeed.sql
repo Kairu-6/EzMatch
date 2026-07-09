@@ -35,3 +35,10 @@ CREATE POLICY bank_feed_link_tenant ON bank_feed_link
 -- Provenance tag so a synced statement reads as 'bankfeed' rather than an upload.
 -- (upload_parsed_statement writes it; default keeps every existing upload as 'upload'.)
 ALTER TABLE bank_statement ADD COLUMN IF NOT EXISTS source text DEFAULT 'upload';
+
+-- file_type CHECK needs to allow 'feed' (bank-feed rows carry no real file). Live
+-- prod already has this constraint update applied directly; checked in here too so
+-- a fresh project rebuild from migrations matches prod instead of rejecting feed rows.
+ALTER TABLE bank_statement DROP CONSTRAINT IF EXISTS bank_statement_file_type_check;
+ALTER TABLE bank_statement ADD CONSTRAINT bank_statement_file_type_check
+  CHECK (file_type = ANY (ARRAY['csv','xlsx','xls','pdf','feed']));
