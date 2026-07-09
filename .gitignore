@@ -34,6 +34,42 @@ apps/frontend/.vercel
 # Python (apps/backend)
 # ========================
 
+# ========================
+# Next.js (apps/frontend)
+# ========================
+
+# dependencies
+apps/frontend/node_modules
+apps/frontend/.pnp
+apps/frontend/.pnp.*
+apps/frontend/.yarn/*
+!apps/frontend/.yarn/patches
+!apps/frontend/.yarn/plugins
+!apps/frontend/.yarn/releases
+!apps/frontend/.yarn/versions
+
+#environment
+apps/frontend/.env.local
+
+# testing
+apps/frontend/coverage
+
+# next.js build output
+apps/frontend/.next/
+apps/frontend/out/
+apps/frontend/build
+
+# typescript
+apps/frontend/*.tsbuildinfo
+apps/frontend/next-env.d.ts
+
+# vercel
+apps/frontend/.vercel
+
+# ========================
+# Python (apps/backend)
+# ========================
+
 # virtual environment
 apps/backend/venv/
 apps/backend/.venv/
@@ -41,10 +77,10 @@ apps/backend/env/
 apps/backend/.env/
 
 # compiled files
-apps/backend/__pycache__/
-apps/backend/*.pyc
-apps/backend/*.pyo
-apps/backend/*.pyd
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
 
 # distribution / packaging
 apps/backend/dist/
@@ -57,6 +93,7 @@ apps/backend/*.egg-info/
 
 .env
 .env.*
+!.env.example
 .env.local
 .env.development.local
 .env.test.local
@@ -75,6 +112,7 @@ yarn-error.log*
 # OS files
 .DS_Store
 Thumbs.db
+desktop.ini
 
 # editor
 .vscode/
@@ -85,3 +123,4 @@ Thumbs.db
 # function-catalog generator intermediates (regenerable via tools/gen_function_catalog.py)
 tools/backend_functions.json
 tools/frontend_functions.json
+tools/catalog.html
