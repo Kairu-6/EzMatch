@@ -29,15 +29,15 @@ ezMatch transforms SME unit economics by replacing high-fixed labor costs with s
 
 *(Note: The ezMatch cost below assumes a 500-invoice SME utilizing the RM 139 Base and an 87.9% AI success rate for the remaining 300 invoices).*
 
-| Metric | Manual SME (500 Invoices) | ezMatch SME (500 Invoices) |
+| Metric | Manual SME (500 Invoices) | ezMatch SME (300 Invoices) |
 | :--- | :--- | :--- |
 | **Cost** | RM 4,000 / month (AP Salary) | ~RM 167 / month |
-| **Error Rate** | 22.5% | 0% (AI-driven matching) |
+| **Error Rate** | 22% | 0% (AI-driven matching) |
 | **Leakage Risk** | 5% of total revenue | Neutralized via Python logic |
 
 ### Key ROI Highlights:
 *   **Labor Savings:** Reduces a RM 4,000 monthly salary burden to under RM 180.
-*   **Accuracy:** Eliminates the 22.5% human error rate inherent in manual data entry.
+*   **Accuracy:** Eliminates the 22% human error rate inherent in manual data entry.
 *   **Risk Mitigation:** Deterministic Python rules prevent duplicate billing and financial leakage, protecting against the average 5% revenue loss experienced by SMEs.
 
 ### 3. Hard Infrastructure Cost Breakdown
