@@ -6,6 +6,9 @@ ezMatch is a full-stack, agentic financial reconciliation platform built indepen
 
 Designed specifically for the **NexHack 2026** physical finals at Xenber Sdn. Bhd., ezMatch moves past the "demo-ware" stage. It is built for real-world enterprise operations, focusing on depth of execution, explainability, and trust.
 
+## Pitch Deck
+https://canva.link/8vz4h4xuou8r1ns
+
 ## 📊 ezMatch's Performance Records
 
 * ✅🤖 **87.9%** AI Success Rate 
@@ -87,4 +90,3 @@ A modular Python backend designed for heavy lifting and data processing.
 A modern web interface built with Next.js and Tailwind CSS within the `apps/frontend/` directory.
 * **Authentication:** Integrated with Supabase for secure session management via `supabaseClient.ts`.
 * **Interactive UI:** Features custom modular components for file uploads (`Dropzone.tsx`), activity tracking (`ActivityDrawer.tsx`), and data presentation (`Table.tsx`).
-
